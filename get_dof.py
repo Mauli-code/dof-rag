@@ -2,18 +2,17 @@
 
 # Description: Script para descargar el Diario Oficial de la Federación (DOF) de México
 
-#wget --https-only "https://diariooficial.gob.mx/abrirPDF.php?archivo=23012025-MAT.pdf&anio=2025&repo=" -O "DOF_23012025-MAT.pdf"
+#wget --https-only "https://diariooficial.gob.mx/abrirPDF.php?archivo=23012025-MAT.pdf&anio=2025&repo=repositorio/" -O "DOF_23012025-MAT.pdf
 
 import os
 import requests
 import ssl
 import urllib3
 from requests.adapters import HTTPAdapter
-from urllib3.poolmanager import PoolManager
 from datetime import datetime
 
 class TLSAdapter(HTTPAdapter):
-    """Adaptador personalizado para forzar TLS 1.2 o 1.3"""
+    """Custom adapter to force TLS 1.2 or 1.3"""
     def __init__(self, ssl_context=None, **kwargs):
         self.ssl_context = ssl_context or ssl.create_default_context()
         super().__init__(**kwargs)
@@ -22,18 +21,20 @@ class TLSAdapter(HTTPAdapter):
         kwargs["ssl_context"] = self.ssl_context
         return super().init_poolmanager(*args, **kwargs)
 
-# Crear un contexto SSL con TLS 1.2 y menos restricciones
+# Create an SSL context with TLS 1.2 and reduced restrictions
 ssl_context = ssl.create_default_context()
-ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")  # Reduce nivel de seguridad si es necesario
+ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
 
 session = requests.Session()
 session.mount("https://", TLSAdapter(ssl_context=ssl_context))
 
 def get_url(year, month, day):
+    """Generate the URL for a given date"""
     base_url = "https://diariooficial.gob.mx/abrirPDF.php?archivo="
-    return f"{base_url}{day}{month}{year}-MAT.pdf&anio={year}&repo="
+    return f"{base_url}{day}{month}{year}-MAT.pdf&anio={year}&repo=repositorio/"
 
 def get_dof(year, month, day):
+    """Download the DOF PDF for a given date"""
     url = get_url(year, month, day)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -43,46 +44,118 @@ def get_dof(year, month, day):
     if response.status_code == 200:
         return response.content
     else:
-        raise Exception(f"Error {response.status_code}: No se pudo descargar {url}")
+        return None  # Return None instead of raising an error
 
+def is_file_valid(filepath):
+    """Check if a file exists and is a valid PDF"""
+    if not os.path.exists(filepath):
+        return False  # File does not exist
+    
+    if os.path.getsize(filepath) < 1000:  # Small files are likely invalid
+        return False
+    
+    with open(filepath, "rb") as file:
+        header = file.read(4)
+        if not header.startswith(b"%PDF"):  # A valid PDF should start with %PDF
+            return False
+
+    return True  # The file is valid
+
+def check_year_empty(year):
+    """Check if ALL files for a given year are empty or invalid"""
+    folder = f"./dof/{year}/"
+
+    if not os.path.exists(folder):
+        print(f"⚠️ The folder {folder} does not exist, assuming empty.")
+        return True
+
+    all_empty = True
+    for root, _, files in os.walk(folder):
+        for file in files:
+            if file.endswith(".pdf") and is_file_valid(os.path.join(root, file)):
+                return False  # At least one valid file found, so the year is NOT empty
+
+    print(f"🛑 ALL files for the year {year} are empty or missing.")
+    return True
 
 def save_dof(year, month, day):
-    """Descarga y guarda el PDF solo si no está vacío."""
-    content = get_dof(year, month, day)
-
-    if not content or len(content) < 1000:  # Umbral de 1000 bytes para evitar archivos vacíos o inválidos
-        print(f"⚠️ Archivo {day}{month}{year}-MAT.pdf está vacío o no válido. No se guardará.")
-        return
-    
+    """Download and save the PDF only if it's not already valid."""
     folder = f"./dof/{year}/{month}"
     filename = f"{day}{month}{year}-MAT.pdf"
     filepath = os.path.join(folder, filename)
 
-    os.makedirs(folder, exist_ok=True)  # Crea la carpeta si no existe
+    # Skip if file already exists and is valid
+    if is_file_valid(filepath):
+        print(f"✅ File already exists and is valid: {filepath}. Skipping download.")
+        return
 
-    with open(filepath, "wb") as file:
-        file.write(content)
+    try:
+        content = get_dof(year, month, day)
 
-    print(f"✅ Archivo guardado: {filepath}")
+        # Validate the content
+        if not content or len(content) < 1000 or not content.startswith(b"%PDF"):
+            print(f"⚠️ File {filename} is empty, corrupt, or not a valid PDF. It will not be saved.")
+            return
+        
+        os.makedirs(folder, exist_ok=True)  # Create folder if it doesn't exist
 
+        with open(filepath, "wb") as file:
+            file.write(content)
 
-# Guardar los PDFs
-mes_dias = {
-    "01": 31, "02": 28, "03": 31, "04": 30, "05": 31, "06": 30,
+        print(f"✅ File saved: {filepath}")
+
+    except Exception as e:
+        print(f"❌ Error downloading {filename}: {e}")
+
+# Download PDFs
+month_days = {
+    "01": 31, "02": 29, "03": 31, "04": 30, "05": 31, "06": 30,
     "07": 31, "08": 31, "09": 30, "10": 31, "11": 30, "12": 31
 }
 
 _break = False
-for month, days in mes_dias.items():
-    if _break:
-        break
-    for day in range(1, days + 1):
-        # break if day is gretter than today
-        _month = datetime.now().strftime("%m")
-        _day = datetime.now().strftime("%d")
-        if int(month) >= int(_month) and int(day) > int(_day):
-            _break = True
+current_year = datetime.now().year
+empty_years_count = 0  # Count consecutive empty years
+
+for year in range(current_year, current_year - 50, -1):
+    print(f"\n🔎 Checking year {year}...\n")
+
+    year_has_valid_files = False  # Reset flag for the current year
+
+    for month, days in month_days.items():
+        if _break:
+            _break = False
             break
-        save_dof("2025", month, f"{day:02d}")  # f"{day:02d}" -> 01, 02
+        for day in range(1, days + 1):
+            # Stop if the day is greater than today (to prevent downloading future dates)
+            _year = datetime.now().year
+            _month = datetime.now().strftime("%m")
+            _day = datetime.now().strftime("%d")
+            if int(year) >= int(_year) and \
+                int(month) >= int(_month) and \
+                int(day) > int(_day):
+                _break = True
+                break
+
+            save_dof(str(year), month, f"{day:02d}")  # f"{day:02d}" -> 01, 02, ...
+
+            # If we find a valid file, mark the year as having data
+            folder = f"./dof/{year}/{month}"
+            filename = f"{day}{month}{year}-MAT.pdf"
+            filepath = os.path.join(folder, filename)
+
+            if is_file_valid(filepath):
+                year_has_valid_files = True
+
+    # After processing each year, check if it was fully empty
+    if check_year_empty(year):
+        empty_years_count += 1
+    else:
+        empty_years_count = 0  # Reset count if we find a valid year
+
+    # Stop downloading if we find 2 consecutive empty years
+    if empty_years_count >= 2:
+        print(f"🚨 Stopping process after {year} because the last 2 years were empty!")
+        break
 
 
