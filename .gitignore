@@ -1,3 +1,8 @@
+# DOF PDFs
+# Ignore all PDFs in the DOF folder
+dof/*/
+dof/*/*/*-MAT.pdf
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
