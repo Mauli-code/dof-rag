@@ -9,6 +9,7 @@ import ssl
 from datetime import datetime
 
 import requests
+import typer
 import urllib3
 from requests.adapters import HTTPAdapter
 
@@ -119,66 +120,77 @@ def save_dof(year, month, day):
         print(f"❌ Error downloading {filename}: {e}")
 
 
-# Download PDFs
-month_days = {
-    "01": 31,
-    "02": 29,
-    "03": 31,
-    "04": 30,
-    "05": 31,
-    "06": 30,
-    "07": 31,
-    "08": 31,
-    "09": 30,
-    "10": 31,
-    "11": 30,
-    "12": 31,
-}
+def main(
+    start_year: int = typer.Option(datetime.now().year, "--start-year", help="Start year (defaults to current year)"),
+    end_year: int = typer.Option(datetime.now().year - 50, "--end-year", help="End year (defaults to 50 years before current year)")
+) -> None:
+    """Download DOF PDFs for a range of years."""
+    if start_year < end_year:
+        typer.echo("Error: start-year must be greater than end-year (we count backwards)")
+        raise typer.Exit(code=1)
 
-_break = False
-start_year = datetime.now().year
-end_year = start_year - 50
-empty_years_count = 0  # Count consecutive empty years
+    # Download PDFs
+    month_days = {
+        "01": 31,
+        "02": 29,
+        "03": 31,
+        "04": 30,
+        "05": 31,
+        "06": 30,
+        "07": 31,
+        "08": 31,
+        "09": 30,
+        "10": 31,
+        "11": 30,
+        "12": 31,
+    }
 
-for year in range(start_year, end_year, -1):
-    print(f"\n🔎 Checking year {year}...\n")
+    _break = False
+    empty_years_count = 0  # Count consecutive empty years
 
-    year_has_valid_files = False  # Reset flag for the current year
+    for year in range(start_year, end_year, -1):
+        typer.echo(f"\n🔎 Checking year {year}...\n")
 
-    for month, days in month_days.items():
-        if _break:
-            _break = False
-            break
-        for day in range(1, days + 1):
-            # Stop if the day is greater than today (to prevent downloading future dates)
-            _year = datetime.now().year
-            _month = datetime.now().strftime("%m")
-            _day = datetime.now().strftime("%d")
-            if (
-                int(year) >= int(_year)
-                and int(month) >= int(_month)
-                and int(day) > int(_day)
-            ):
-                _break = True
+        year_has_valid_files = False  # Reset flag for the current year
+
+        for month, days in month_days.items():
+            if _break:
+                _break = False
                 break
+            for day in range(1, days + 1):
+                # Stop if the day is greater than today (to prevent downloading future dates)
+                _year = datetime.now().year
+                _month = datetime.now().strftime("%m")
+                _day = datetime.now().strftime("%d")
+                if (
+                    int(year) >= int(_year)
+                    and int(month) >= int(_month)
+                    and int(day) > int(_day)
+                ):
+                    _break = True
+                    break
 
-            save_dof(str(year), month, f"{day:02d}")  # f"{day:02d}" -> 01, 02, ...
+                save_dof(str(year), month, f"{day:02d}")  # f"{day:02d}" -> 01, 02, ...
 
-            # If we find a valid file, mark the year as having data
-            folder = f"./dof/{year}/{month}"
-            filename = f"{day}{month}{year}-MAT.pdf"
-            filepath = os.path.join(folder, filename)
+                # If we find a valid file, mark the year as having data
+                folder = f"./dof/{year}/{month}"
+                filename = f"{day}{month}{year}-MAT.pdf"
+                filepath = os.path.join(folder, filename)
 
-            if is_file_valid(filepath):
-                year_has_valid_files = True
+                if is_file_valid(filepath):
+                    year_has_valid_files = True
 
-    # After processing each year, check if it was fully empty
-    if check_year_empty(year):
-        empty_years_count += 1
-    else:
-        empty_years_count = 0  # Reset count if we find a valid year
+        # After processing each year, check if it was fully empty
+        if check_year_empty(year):
+            empty_years_count += 1
+        else:
+            empty_years_count = 0  # Reset count if we find a valid year
 
-    # Stop downloading if we find 2 consecutive empty years
-    if empty_years_count >= 2:
-        print(f"🚨 Stopping process after {year} because the last 2 years were empty!")
-        break
+        # Stop downloading if we find 2 consecutive empty years
+        if empty_years_count >= 2:
+            typer.echo(f"🚨 Stopping process after {year} because the last 2 years were empty!")
+            break
+
+
+if __name__ == "__main__":
+    typer.run(main)
