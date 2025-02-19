@@ -2,17 +2,20 @@
 
 # Description: Script para descargar el Diario Oficial de la Federación (DOF) de México
 
-#wget --https-only "https://diariooficial.gob.mx/abrirPDF.php?archivo=23012025-MAT.pdf&anio=2025&repo=repositorio/" -O "DOF_23012025-MAT.pdf
+# wget --https-only "https://diariooficial.gob.mx/abrirPDF.php?archivo=23012025-MAT.pdf&anio=2025&repo=repositorio/" -O "DOF_23012025-MAT.pdf
 
 import os
-import requests
 import ssl
+from datetime import datetime
+
+import requests
 import urllib3
 from requests.adapters import HTTPAdapter
-from datetime import datetime
+
 
 class TLSAdapter(HTTPAdapter):
     """Custom adapter to force TLS 1.2 or 1.3"""
+
     def __init__(self, ssl_context=None, **kwargs):
         self.ssl_context = ssl_context or ssl.create_default_context()
         super().__init__(**kwargs)
@@ -21,6 +24,7 @@ class TLSAdapter(HTTPAdapter):
         kwargs["ssl_context"] = self.ssl_context
         return super().init_poolmanager(*args, **kwargs)
 
+
 # Create an SSL context with TLS 1.2 and reduced restrictions
 ssl_context = ssl.create_default_context()
 ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
@@ -28,10 +32,12 @@ ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
 session = requests.Session()
 session.mount("https://", TLSAdapter(ssl_context=ssl_context))
 
+
 def get_url(year, month, day):
     """Generate the URL for a given date"""
     base_url = "https://diariooficial.gob.mx/abrirPDF.php?archivo="
     return f"{base_url}{day}{month}{year}-MAT.pdf&anio={year}&repo=repositorio/"
+
 
 def get_dof(year, month, day):
     """Download the DOF PDF for a given date"""
@@ -46,20 +52,22 @@ def get_dof(year, month, day):
     else:
         return None  # Return None instead of raising an error
 
+
 def is_file_valid(filepath):
     """Check if a file exists and is a valid PDF"""
     if not os.path.exists(filepath):
         return False  # File does not exist
-    
+
     if os.path.getsize(filepath) < 1000:  # Small files are likely invalid
         return False
-    
+
     with open(filepath, "rb") as file:
         header = file.read(4)
         if not header.startswith(b"%PDF"):  # A valid PDF should start with %PDF
             return False
 
     return True  # The file is valid
+
 
 def check_year_empty(year):
     """Check if ALL files for a given year are empty or invalid"""
@@ -78,6 +86,7 @@ def check_year_empty(year):
     print(f"🛑 ALL files for the year {year} are empty or missing.")
     return True
 
+
 def save_dof(year, month, day):
     """Download and save the PDF only if it's not already valid."""
     folder = f"./dof/{year}/{month}"
@@ -94,9 +103,11 @@ def save_dof(year, month, day):
 
         # Validate the content
         if not content or len(content) < 1000 or not content.startswith(b"%PDF"):
-            print(f"⚠️ File {filename} is empty, corrupt, or not a valid PDF. It will not be saved.")
+            print(
+                f"⚠️ File {filename} is empty, corrupt, or not a valid PDF. It will not be saved."
+            )
             return
-        
+
         os.makedirs(folder, exist_ok=True)  # Create folder if it doesn't exist
 
         with open(filepath, "wb") as file:
@@ -107,17 +118,29 @@ def save_dof(year, month, day):
     except Exception as e:
         print(f"❌ Error downloading {filename}: {e}")
 
+
 # Download PDFs
 month_days = {
-    "01": 31, "02": 29, "03": 31, "04": 30, "05": 31, "06": 30,
-    "07": 31, "08": 31, "09": 30, "10": 31, "11": 30, "12": 31
+    "01": 31,
+    "02": 29,
+    "03": 31,
+    "04": 30,
+    "05": 31,
+    "06": 30,
+    "07": 31,
+    "08": 31,
+    "09": 30,
+    "10": 31,
+    "11": 30,
+    "12": 31,
 }
 
 _break = False
-current_year = datetime.now().year
+start_year = datetime.now().year
+end_year = start_year - 50
 empty_years_count = 0  # Count consecutive empty years
 
-for year in range(current_year, current_year - 50, -1):
+for year in range(start_year, end_year, -1):
     print(f"\n🔎 Checking year {year}...\n")
 
     year_has_valid_files = False  # Reset flag for the current year
@@ -131,9 +154,11 @@ for year in range(current_year, current_year - 50, -1):
             _year = datetime.now().year
             _month = datetime.now().strftime("%m")
             _day = datetime.now().strftime("%d")
-            if int(year) >= int(_year) and \
-                int(month) >= int(_month) and \
-                int(day) > int(_day):
+            if (
+                int(year) >= int(_year)
+                and int(month) >= int(_month)
+                and int(day) > int(_day)
+            ):
                 _break = True
                 break
 
@@ -157,5 +182,3 @@ for year in range(current_year, current_year - 50, -1):
     if empty_years_count >= 2:
         print(f"🚨 Stopping process after {year} because the last 2 years were empty!")
         break
-
-
