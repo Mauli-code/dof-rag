@@ -10,7 +10,6 @@ from datetime import datetime
 
 import requests
 import typer
-import urllib3
 from requests.adapters import HTTPAdapter
 
 
