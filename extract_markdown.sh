@@ -19,6 +19,10 @@ fi
 # Create output directory if it doesn't exist
 mkdir -p "$OUTPUT_DIR"
 
+# Counter for tracking processed and skipped files
+processed=0
+skipped=0
+
 # Process each PDF file in the input directory
 for pdf_file in "$INPUT_DIR"/*.pdf; do
     # Check if there are any PDF files
@@ -27,8 +31,16 @@ for pdf_file in "$INPUT_DIR"/*.pdf; do
         exit 1
     fi
 
-    # Get the filename without path
+    # Get the filename without path and extension
     filename=$(basename "$pdf_file")
+    dirname="${filename%.pdf}"
+
+    # Check if a directory with the same name (minus .pdf) already exists in output_dir
+    if [ -d "$OUTPUT_DIR/$dirname" ]; then
+        echo "Skipping: $filename (output directory already exists)"
+        skipped=$((skipped+1))
+        continue
+    fi
 
     echo "Processing: $filename"
 
@@ -38,9 +50,10 @@ for pdf_file in "$INPUT_DIR"/*.pdf; do
     # Check if the command was successful
     if [ $? -eq 0 ]; then
         echo "Successfully processed: $filename"
+        processed=$((processed+1))
     else
         echo "Error processing: $filename"
     fi
 done
 
-echo "All PDF files have been processed."
+echo "Processing complete: $processed files processed, $skipped files skipped."
