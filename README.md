@@ -13,3 +13,43 @@ uv sync # Sincronizar dependencias
 uv run get_dof.py --help
 uv run get_dof.py --start-year=2025 --end-year=2023
 ```
+
+Esto crea directorios como:
+
+```
+$ tree --sort=mtime dof | head -n 10
+dof
+├── 2025
+│   ├── 01
+│   │   ├── 02012025-MAT.pdf
+│   │   ├── 03012025-MAT.pdf
+│   │   ├── 06012025-MAT.pdf
+│   │   ├── 07012025-MAT.pdf
+...
+```
+
+Para convertirlos a formato markdown, ejecuta el siguiente comando:
+
+Para convertir un folder completo:
+```
+marker --output_dir dof_markdown/2024/04/ \
+  --paginate_output \
+  --languages="es" \
+  --skip_existing \
+  --workers=1 \
+  dof/2024/04/
+# este comando tardó 2h 31m 23s en una macbook pro M3 de 36GB RAM
+```
+
+**NOTA**: Si el comando queda a la mitad, conviene borrar las carpetas incompletas
+(el archivo markdown es el que puedes ver si acabó con todas las hojas) para que el --skip_existing funcione correctamente.
+
+Para un archivo específico:
+```
+marker_single --output_dir dof_markdown/2024/04/ \
+  --paginate_output \
+  --languages="es" \
+  dof/2024/04/01042024-MAT.pdf
+# este comando tardó 2m 7s en una macbook pro M3 de 36GB RAM
+# Sorprendentemente, porque otros pueden tardar más de 10 minutos.
+```
