@@ -41,6 +41,9 @@ marker --output_dir dof_markdown/2024/04/ \
 # este comando tardó 2h 31m 23s en una macbook pro M3 de 36GB RAM
 ```
 
+**NOTA**: Si el comando queda a la mitad, conviene borrar las carpetas incompletas
+(el archivo markdown es el que puedes ver si acabó con todas las hojas) para que el --skip_existing funcione correctamente.
+
 Para un archivo específico:
 ```
 marker_single --output_dir dof_markdown/2024/04/ \
