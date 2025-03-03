@@ -16,7 +16,10 @@ from google.genai import types
 
 from get_dof import is_file_valid
 
-client = genai.Client()
+
+API_KEY = os.getenv("GENAI")
+
+client = genai.Client(api_key=API_KEY)
 
 
 def count_pages(pdf_path):
