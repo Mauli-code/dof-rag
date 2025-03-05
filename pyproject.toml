@@ -10,4 +10,7 @@ dependencies = [
     "requests>=2.32.3",
     "sqlite-vec>=0.1.6",
     "typer>=0.15.1",
+    "ipykernel>=6.29.5",
+    "marimo[sql]>=0.11.12",
+    "sqlmodel>=0.0.23",
 ]
