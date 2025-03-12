@@ -6,6 +6,22 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "marker-pdf>=1.5.5",
+    "fastlite>=0.1.2",
     "requests>=2.32.3",
+    "sqlite-vec>=0.1.6",
     "typer>=0.15.1",
+    "ipykernel>=6.29.5",
+    "semantic-text-splitter>=0.24.1",
+    "sentence-transformers>=3.4.1",
+    "ruff>=0.9.9",
+    "tokenizers>=0.21.0",
+    "tqdm>=4.67.1",
 ]
+
+[tool.ruff]
+# Same as Black.
+#line-length = 88
+
+[tool.ruff.lint]
+# sort imports
+extend-select = ["I"]
