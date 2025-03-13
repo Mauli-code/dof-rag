@@ -1,106 +1,61 @@
 [
     {
-        "date": "2025-01-02",
-        "category": "MAT",
-        "pages": "1",
         "file": "02012025-MAT.md",
         "path": "extracted/2025\\01\\02012025-MAT.md"
     },
     {
-        "date": "2025-01-03",
-        "category": "MAT",
-        "pages": "Unknown",
         "file": "03012025-MAT.md",
         "path": "extracted/2025\\01\\03012025-MAT.md"
     },
     {
-        "date": "2025-01-06",
-        "category": "MAT",
-        "pages": "390",
         "file": "06012025-MAT.md",
         "path": "extracted/2025\\01\\06012025-MAT.md"
     },
     {
-        "date": "2025-01-07",
-        "category": "MAT",
-        "pages": "1",
         "file": "07012025-MAT.md",
         "path": "extracted/2025\\01\\07012025-MAT.md"
     },
     {
-        "date": "2025-01-08",
-        "category": "MAT",
-        "pages": "1",
         "file": "08012025-MAT.md",
         "path": "extracted/2025\\01\\08012025-MAT.md"
     },
     {
-        "date": "2025-01-09",
-        "category": "MAT",
-        "pages": "339",
         "file": "09012025-MAT.md",
         "path": "extracted/2025\\01\\09012025-MAT.md"
     },
     {
-        "date": "2025-01-10",
-        "category": "MAT",
-        "pages": "1",
         "file": "10012025-MAT.md",
         "path": "extracted/2025\\01\\10012025-MAT.md"
     },
     {
-        "date": "2025-01-13",
-        "category": "MAT",
-        "pages": "Unknown",
         "file": "13012025-MAT.md",
         "path": "extracted/2025\\01\\13012025-MAT.md"
     },
     {
-        "date": "2025-01-14",
-        "category": "MAT",
-        "pages": "1",
         "file": "14012025-MAT.md",
         "path": "extracted/2025\\01\\14012025-MAT.md"
     },
     {
-        "date": "2025-01-15",
-        "category": "MAT",
-        "pages": "1",
         "file": "15012025-MAT.md",
         "path": "extracted/2025\\01\\15012025-MAT.md"
     },
     {
-        "date": "2025-01-16",
-        "category": "MAT",
-        "pages": "43",
         "file": "16012025-MAT.md",
         "path": "extracted/2025\\01\\16012025-MAT.md"
     },
     {
-        "date": "2025-01-17",
-        "category": "MAT",
-        "pages": "1",
         "file": "17012025-MAT.md",
         "path": "extracted/2025\\01\\17012025-MAT.md"
     },
     {
-        "date": "2025-01-20",
-        "category": "MAT",
-        "pages": "Unknown",
         "file": "20012025-MAT.md",
         "path": "extracted/2025\\01\\20012025-MAT.md"
     },
     {
-        "date": "2025-01-21",
-        "category": "MAT",
-        "pages": "1",
         "file": "21012025-MAT.md",
         "path": "extracted/2025\\01\\21012025-MAT.md"
     },
     {
-        "date": "2025-01-22",
-        "category": "MAT",
-        "pages": "Unknown",
         "file": "22012025-MAT.md",
         "path": "extracted/2025\\01\\22012025-MAT.md"
     }
