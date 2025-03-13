@@ -1,4 +1,15 @@
 # %%
+"""
+DOF Document Embedding Generator
+
+This script processes markdown files from the Mexican Official Gazette (DOF),
+extracts their content, splits them into semantic chunks, and generates vector
+embeddings for efficient semantic search. The embeddings are stored in a SQLite
+database with vector search capabilities.
+
+Usage:
+python extract_embeddings.py /path/to/markdown/files
+"""
 
 import os
 from datetime import datetime
@@ -14,16 +25,20 @@ from tqdm import tqdm
 # %%
 
 tokenizer = Tokenizer.from_pretrained("nomic-ai/modernbert-embed-base")
+
+#Model configuration
 model = SentenceTransformer("nomic-ai/modernbert-embed-base", trust_remote_code=True)
 splitter = MarkdownSplitter.from_huggingface_tokenizer(tokenizer, 2048)
 
 # %%
-
+#Database initialization and schema setup
+#Using SQLite with sqlite-vec extension for vector similarity search
 db = database("dof_db/db.sqlite")
 db.conn.enable_load_extension(True)
 load(db.conn)
 db.conn.enable_load_extension(False)
 
+#Documents table: stores metadata about each document
 db.t.documents.create(
     id=int,
     title=str,
@@ -50,13 +65,21 @@ db.t.chunks.create(
 
 def get_url_from_filename(filename: str):
     """
-    Generate the URL based on the filename pattern '23012025-MAT.pdf'.
+    Generate the URL based on the filename pattern.
+
+    Expected filename format: DDMMYYYY-XXX.md
+    Example: 23012025-MAT.md (representing January 23, 2025, MAT section)
+
+    The generated URL points to the PDF document in the DOF repository.
 
     Args:
         filename (str): Filename of the .md file
-
+        
     Returns:
-        str: The generated URL
+        str: The URL to the original PDF document
+        
+    Raises:
+        ValueError: If the filename doesn't match the expected format
     """
     # Extract just the base filename in case the full path was passed
     base_filename = os.path.basename(filename).replace('.md', '')
@@ -76,20 +99,30 @@ def get_url_from_filename(filename: str):
 
 def process_file(file_path):
     """
-    Process a file. Replace this function with your specific processing logic.
+    Process a markdown file, extract content, generate embeddings and store in database.
+    This function:
+    1. Reads file content
+    2. Extracts metadata from filename
+    3. Deletes any previous version of this document
+    4. Splits content into semantic chunks
+    5. Generates vector embeddings for each chunk
+    6. Stores chunks and embeddings in the database
 
     Args:
-        file_path (str): Path to the file to process
+        file_path (str): Path to the markdown file to process
+        
     """
     with open(file_path, 'r', encoding='utf-8') as file:
         content = file.read()
 
-        # Get the title (filename without extension)
+        # Extract metadata from filename
         title = os.path.splitext(os.path.basename(file_path))[0]
         url = get_url_from_filename(file_path)
 
+        # Delete any existing document with the same URL to avoid duplicates
         db.t.documents.delete_where('url = ?', [url])
 
+        # Insert document metadata into the documents table
         doc = db.t.documents.insert(
             title=title,
             url=url,
@@ -97,11 +130,14 @@ def process_file(file_path):
             created_at=datetime.now()
         )
 
+        # Split content into semantic chunks based on configured tokenizer
         chunks = splitter.chunks(content)
 
         # Store chunks and embeddings
         for i, chunk in enumerate(tqdm(chunks, desc=f"Processing {file_path}")):
             embedding = model.encode(f"search_document: {chunk}")
+            # Prefix with 'search_document:' to format text for optimal embedding retrieval
+            # This helps the model distinguish between query and document text
             db.t.chunks.insert(
                 document_id=doc['id'],
                 text=chunk,
