@@ -7,9 +7,16 @@ Instala [uv](https://docs.astral.sh/uv/) para manejar las dependencias y ejecuta
 
 Una vez instalado uv, ejecuta el siguiente comando para iniciar el proyecto:
 
-```
+```bash
 uv venv # Crear un entorno virtual
 uv sync # Sincronizar dependencias
+```
+
+## Bajar archivos del DOF
+
+Para bajar archivos del DOF se usa el script get_dof.py de la siguiente manera:
+
+```bash
 uv run get_dof.py --help
 uv run get_dof.py --start-year=2025 --end-year=2023
 ```
@@ -28,10 +35,15 @@ dof
 ...
 ```
 
-Para convertirlos a formato markdown, ejecuta el siguiente comando:
+## Extraer markdown:
 
-Para convertir un folder completo:
-```
+### Por folders
+
+UV instala la dependencia [marker](https://github.com/VikParuchuri/marker) que contiene un ejecutable para convertir PDFs a formato markdown.
+
+Para convertir un folder completo ejecuta este comando:
+
+```bash
 marker --output_dir dof_markdown/2024/04/ \
   --paginate_output \
   --languages="es" \
@@ -41,11 +53,17 @@ marker --output_dir dof_markdown/2024/04/ \
 # este comando tardó 2h 31m 23s en una macbook pro M3 de 36GB RAM
 ```
 
-**NOTA**: Si el comando queda a la mitad, conviene borrar las carpetas incompletas
-(el archivo markdown es el que puedes ver si acabó con todas las hojas) para que el --skip_existing funcione correctamente.
+**NOTA**: Si el comando queda a la mitad, conviene borrar las carpetas incompletas.
+Para ver cuáles archivos están incompletos puedes revisar el archivo markdown que tiene separaciones por hojas gracias a la opcíon `--paginate_output`
+con el formato `{pagina}------------------------------------------------`. Revisa que contenga todas las páginas del archivo PDF.
 
-Para un archivo específico:
-```
+Una vez borradas las carpetas incompletas, puedes volver a ejecutar el comando anterior para que el `--skip_existing` se salte las carpetas que ya existen.
+
+### Por archivos
+
+Para extraer el markdown de un archivo específico:
+
+```bash
 marker_single --output_dir dof_markdown/2024/04/ \
   --paginate_output \
   --languages="es" \
@@ -53,3 +71,14 @@ marker_single --output_dir dof_markdown/2024/04/ \
 # este comando tardó 2m 7s en una macbook pro M3 de 36GB RAM
 # Sorprendentemente, porque otros pueden tardar más de 10 minutos.
 ```
+
+## Extraer embeddings
+
+Para extraer embeddings de un archivo específico:
+
+```bash
+python extract_embeddings.py dof_markdown/2024/04/
+```
+
+Puedes especificar la carpeta de un solo archivo, o la carpeta de un mes, o incluso la carpeta de un año.
+En una macbook pro M3 de 36GB RAM, este comando tardó 190 minutos en extraer los embeddings de enero del 2025.
