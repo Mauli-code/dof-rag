@@ -5,12 +5,23 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "google-genai>=1.2.0",
-    "pikepdf>=9.5.2",
+    "marker-pdf>=1.5.5",
+    "fastlite>=0.1.2",
     "requests>=2.32.3",
+    "sqlite-vec>=0.1.6",
     "typer>=0.15.1",
+    "ipykernel>=6.29.5",
+    "semantic-text-splitter>=0.24.1",
+    "sentence-transformers>=3.4.1",
+    "ruff>=0.9.9",
+    "tokenizers>=0.21.0",
+    "tqdm>=4.67.1",
 ]
 
-[[tool.pyright.overrides]]
-module = ["google.*"]
-follow_untyped_imports = true
+[tool.ruff]
+# Same as Black.
+#line-length = 88
+
+[tool.ruff.lint]
+# sort imports
+extend-select = ["I"]

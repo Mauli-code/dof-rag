@@ -120,12 +120,22 @@ def save_dof(year, month, day):
 
 
 def main(
-    start_year: int = typer.Option(datetime.now().year, "--start-year", help="Start year (defaults to current year)"),
-    end_year: int = typer.Option(datetime.now().year - 50, "--end-year", help="End year (defaults to 50 years before current year)")
+    start_year: int = typer.Option(
+        datetime.now().year,
+        "--start-year",
+        help="Start year (defaults to current year)",
+    ),
+    end_year: int = typer.Option(
+        datetime.now().year - 50,
+        "--end-year",
+        help="End year (defaults to 50 years before current year)",
+    ),
 ) -> None:
     """Download DOF PDFs for a range of years."""
     if start_year < end_year:
-        typer.echo("Error: start-year must be greater than end-year (we count backwards)")
+        typer.echo(
+            "Error: start-year must be greater than end-year (we count backwards)"
+        )
         raise typer.Exit(code=1)
 
     # Download PDFs
@@ -187,7 +197,9 @@ def main(
 
         # Stop downloading if we find 2 consecutive empty years
         if empty_years_count >= 2:
-            typer.echo(f"🚨 Stopping process after {year} because the last 2 years were empty!")
+            typer.echo(
+                f"🚨 Stopping process after {year} because the last 2 years were empty!"
+            )
             break
 
 
