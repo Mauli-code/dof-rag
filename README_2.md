@@ -15,7 +15,6 @@ Este sistema procesa archivos markdown del Diario Oficial de la Federación (DOF
 
 ## Requisitos
 
-- Python 3.8+
 - Librerías: sentence-transformers, fastlite, sqlite-vec, tokenizers, google-generativeai
 - API Key de Google para Gemini 2.0
 
@@ -48,7 +47,7 @@ Este sistema procesa archivos markdown del Diario Oficial de la Federación (DOF
 2. Haz clic en "Buscar archivos" para actualizar la lista de archivos de chunks
 3. Selecciona un archivo y presiona "Ver contenido" para visualizar su estructura
 
-### Consultas con Gemini 2.0
+### Consultas con Gemini 2.0 de manera interactiva
 
 1. En la sección "Consulta de Documentos DOF con Gemini 2.0", ingresa tu pregunta
 2. Presiona "Consultar" para buscar información relevante
