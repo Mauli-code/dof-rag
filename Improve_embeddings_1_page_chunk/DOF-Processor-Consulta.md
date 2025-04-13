@@ -18,6 +18,7 @@
   - [Detección de encabezados](#detección-de-encabezados)
   - [División de texto por páginas](#división-de-texto-por-páginas)
   - [Construcción de encabezados contextuales](#construcción-de-encabezados-contextuales)
+  - [Algoritmo de encabezados jerárquicos](#algoritmo-de-encabezados-jerárquicos)
 - [Sistema de consulta con Gemini](#sistema-de-consulta-con-gemini)
   - [Búsqueda vectorial](#búsqueda-vectorial)
   - [Contexto expandido](#contexto-expandido)
@@ -26,6 +27,9 @@
 - [Flujo de trabajo](#flujo-de-trabajo)
   - [Procesamiento de documentos](#procesamiento-de-documentos-1)
   - [Consulta de información](#consulta-de-información)
+- [Versiones del sistema](#versiones-del-sistema)
+  - [extract_embeddings_1_page.py](#extract_embeddings_1_pagepy)
+  - [extract_embeddings_structured_headers.py](#extract_embeddings_structured_headerspy)
 - [Limitaciones y consideraciones](#limitaciones-y-consideraciones)
 
 ## Introducción
@@ -40,6 +44,7 @@ El sistema también incluye un módulo de consulta que permite realizar búsqued
 
 - Procesamiento de archivos Markdown del DOF
 - Extracción inteligente de la estructura jerárquica mediante detección de encabezados
+- Algoritmo de seguimiento de encabezados abiertos/activos para mantener el contexto
 - División de texto en chunks basados en marcadores de página
 - Generación de embeddings vectoriales usando SentenceTransformer
 - Almacenamiento en base de datos SQLite con capacidades vectoriales mediante sqlite-vec
@@ -90,19 +95,23 @@ GOOGLE_API_KEY=tu_api_key_aquí
 
 ### Procesamiento de documentos
 
-Para procesar todos los archivos Markdown en un directorio específico:
+Para procesar todos los archivos Markdown en un directorio específico, hay dos scripts disponibles con diferentes enfoques para el manejo de encabezados:
 
 ```bash
+# Versión básica
 python extract_embeddings_1_page.py /ruta/a/directorio/con/archivos/md
+
+# Versión con manejo alternativo de encabezados
+python extract_embeddings_structured_headers.py /ruta/a/directorio/con/archivos/md
 ```
 
-El script realizará las siguientes acciones:
-1. Procesará cada archivo Markdown en el directorio
-2. Extraerá la estructura jerárquica de los documentos
-3. Dividirá el texto en chunks basados en marcadores de página
-4. Generará embeddings para cada chunk
-5. Almacenará todo en la base de datos SQLite
-6. Creará archivos de depuración con el nombre "nombre_archivo_chunks.txt" que muestran cómo se dividió el texto
+Los scripts realizarán las siguientes acciones:
+1. Procesarán cada archivo Markdown en el directorio
+2. Extraerán la estructura jerárquica de los documentos
+3. Dividirán el texto en chunks basados en marcadores de página
+4. Generarán embeddings para cada chunk
+5. Almacenarán todo en la base de datos SQLite
+6. Crearán archivos de depuración con el nombre "nombre_archivo_chunks.txt" que muestran cómo se dividió el texto
 
 ## Estructura del código
 
@@ -135,12 +144,20 @@ La base de datos consta de dos tablas principales:
 
 ### Procesamiento de texto
 
-El código implementa varias funciones clave para procesar los documentos:
+El sistema implementa distintas funciones para procesar los documentos, que varían según la versión del script:
 
+#### Funciones en extract_embeddings_1_page.py (versión básica)
 - `split_text_by_page_break`: Divide el texto en secciones basadas en marcadores de página
-- `extract_headings`: Extrae los encabezados de Markdown presentes en el texto
-- `build_chunk_header`: Construye encabezados contextuales para cada chunk
+- `extract_headings`: Extrae todos los encabezados presentes en el texto
+- `build_chunk_header`: Construye encabezados contextuales para cada chunk con formato "Document: título | Section: encabezado1 > encabezado2 | Page: número"
 - `get_url_from_filename`: Genera la URL del DOF a partir del nombre de archivo
+
+#### Funciones en extract_embeddings_structured_headers.py (versión alternativa)
+- `split_text_by_page_break`: Divide el texto en secciones basadas en marcadores de página (igual que en la versión básica)
+- `get_heading_level`: Detecta el nivel (1-6) y texto de un encabezado markdown
+- `update_open_headings`: Mantiene una lista actualizada de encabezados "abiertos" según la jerarquía del documento
+- `build_header`: Construye encabezados que preservan la estructura jerárquica completa en formato Markdown
+- `get_url_from_filename`: Genera la URL del DOF a partir del nombre de archivo (igual que en la versión básica)
 
 ### Generación de embeddings
 
@@ -161,6 +178,23 @@ HEADING_PATTERN = re.compile(r'^(#{1,6})\s+(.*)$')
 
 Esta expresión identifica líneas que comienzan con entre 1 y 6 símbolos '#', seguidos de un espacio y texto, capturando tanto el nivel de encabezado como su contenido.
 
+En el script `extract_embeddings_structured_headers.py`, el sistema implementa funciones adicionales para determinar con precisión la jerarquía de encabezados y su relación entre sí:
+
+```python
+def get_heading_level(line: str):
+    """
+    Returns the heading level and text,
+    or (None, None) if the line is not a heading.
+    """
+    match = HEADING_PATTERN.match(line)
+    if match:
+        hashes = match.group(1)
+        heading_text = match.group(2).strip()
+        level = len(hashes)
+        return level, heading_text
+    return None, None
+```
+
 ### División de texto por páginas
 
 El algoritmo `split_text_by_page_break` es central en el sistema. Divide el texto en fragmentos basados en marcadores de página con el siguiente formato:
@@ -173,18 +207,64 @@ El sistema detecta estos marcadores y crea chunks separados para cada página, c
 
 ### Construcción de encabezados contextuales
 
-Para cada chunk, se construye un encabezado contextual que incluye:
-- El título del documento
-- Los encabezados encontrados en el chunk actual
-- El número de página
+Hay dos enfoques implementados para la construcción de encabezados contextuales:
 
-Ejemplo: "Document: 23012025-MAT | Section: Título Principal > Subtítulo | Page: 3"
+1. **Enfoque básico** (`extract_embeddings_1_page.py`):
+   - Extrae todos los encabezados en el chunk actual
+   - Hereda el último encabezado del chunk anterior
+   - Construye un encabezado con formato "Document: título | Section: encabezado1 > encabezado2 | Page: número"
+   - Ejemplo: "Document: 23012025-MAT | Section: Título Principal > Subtítulo | Page: 3"
 
-Este encabezado ayuda a que los embeddings capten el contexto jerárquico y la ubicación en el documento, mejorando la calidad de las búsquedas.
+2. **Enfoque alternativo** (`extract_embeddings_structured_headers.py`):
+   - Mantiene un seguimiento de encabezados "abiertos" a lo largo del documento
+   - Preserva la estructura jerárquica completa basada en los niveles de encabezado
+   - Construye encabezados que mantienen el formato Markdown original
+   - Implementa un tratamiento especial para el primer chunk vs. chunks subsecuentes
+   - Ejemplo: 
+     ```
+     # Document: 23012025-MAT | page: 3
+     ## Título Principal
+     ### Subtítulo
+     ```
+
+Este segundo enfoque representa con mayor fidelidad la estructura jerárquica del documento, lo que mejora la calidad de los embeddings y la precisión de las búsquedas.
+
+### Algoritmo de encabezados jerárquicos
+
+El script `extract_embeddings_structured_headers.py` implementa un algoritmo para mantener una estructura jerárquica de encabezados "abiertos" a lo largo del documento:
+
+```python
+def update_open_headings(open_headings, line):
+    """
+    Updates the list of open headings according to the line.
+    
+    - If an H1 is found, the list is reset.
+    - If the line is a heading of level >1:
+        * If the list is empty, it is added.
+        * If the last open heading has a lower or equal level,
+          it is added without removing the previous one (to preserve siblings).
+        * If the new heading is of a higher level (lower number)
+          than the last one, those with a level lower than the new one
+          are preserved and the heading is added.
+    """
+```
+
+Este algoritmo sigue estas reglas:
+
+1. Si se encuentra un encabezado H1, se reinicia la lista de encabezados abiertos
+2. Si se encuentra un encabezado de nivel mayor a 1:
+   - Si la lista está vacía, se agrega el encabezado
+   - Si el último encabezado tiene un nivel menor o igual, se agrega el nuevo sin eliminar los anteriores
+   - Si el nuevo encabezado es de un nivel superior, se conservan solo los encabezados de nivel superior y se agrega el nuevo
+
+La implementación también diferencia el tratamiento para el primer chunk vs. los chunks subsecuentes:
+
+- En el primer chunk, solo se incluye el primer encabezado detectado (si existe)
+- En los demás chunks, se incluyen todos los encabezados abiertos en orden jerárquico
 
 ## Sistema de consulta con Gemini
 
-El módulo `gemini_query.py` implementa un sistema avanzado de búsqueda semántica y consulta mediante Gemini 2.0 para documentos del Diario Oficial de la Federación (DOF).
+El módulo `gemini_query.py` implementa un sistema de búsqueda semántica y consulta mediante Gemini 2.0 para documentos del Diario Oficial de la Federación (DOF).
 
 ### Búsqueda vectorial
 
@@ -285,6 +365,9 @@ En el modo interactivo, el sistema mostrará un prompt para ingresar consultas y
 
 ### Procesamiento de documentos
 
+El flujo específico depende de la versión del script utilizado:
+
+#### Versión básica (extract_embeddings_1_page.py):
 1. Por cada archivo Markdown en el directorio especificado:
    - Se extraen los metadatos del documento
    - Se elimina cualquier versión anterior del documento en la base de datos
@@ -292,10 +375,26 @@ En el modo interactivo, el sistema mostrará un prompt para ingresar consultas y
    - Se verifica si el documento contiene marcadores de página
    - Si encuentra marcadores, divide el texto por páginas; sino, trata todo el contenido como una sola página
    - Por cada página:
-     - Se extraen los encabezados presentes
-     - Se construye el encabezado contextual
+     - Se extraen los encabezados presentes en el chunk actual
+     - Se hereda el último encabezado del chunk anterior (si existe)
+     - Se construye el encabezado contextual con formato "Document: título | Section: encabezado1 > encabezado2 | Page: número"
      - Se genera el embedding combinando el encabezado y el contenido
      - Se guarda en la base de datos y en un archivo de depuración
+
+#### Versión alternativa (extract_embeddings_structured_headers.py):
+1. Por cada archivo Markdown en el directorio especificado:
+   - Se extraen los metadatos del documento
+   - Se elimina cualquier versión anterior del documento en la base de datos
+   - Se inserta el nuevo documento en la tabla 'documents'
+   - Se verifica si el documento contiene marcadores de página
+   - Si encuentra marcadores, divide el texto por páginas; sino, trata todo el contenido como una sola página
+   - Se inicializa una lista vacía de encabezados "abiertos"
+   - Por cada página:
+     - Si es el primer chunk, se realiza una pre-lectura para encontrar el primer encabezado
+     - Se construye el encabezado contextual preservando la estructura jerárquica de los encabezados abiertos
+     - Se genera el embedding combinando el encabezado y el contenido
+     - Se guarda en la base de datos y en un archivo de depuración
+     - Se actualiza la lista de encabezados abiertos procesando cada línea del chunk
 
 ### Consulta de información
 
@@ -308,6 +407,41 @@ En el modo interactivo, el sistema mostrará un prompt para ingresar consultas y
 7. Gemini 2.0 genera una respuesta basada en el contexto
 8. Se muestra la respuesta junto con metadatos del documento fuente
 
+## Versiones del sistema
+
+El sistema cuenta con dos versiones de scripts para el procesamiento de documentos, cada uno con un enfoque diferente para la gestión de encabezados y contexto:
+
+### extract_embeddings_1_page.py
+
+Este es el script original con las siguientes características:
+- Usa un enfoque simple para los encabezados, extrayéndolos del chunk actual
+- Implementa una herencia básica del último encabezado del chunk anterior
+- Construye encabezados con formato "Document: título | Section: encabezado1 > encabezado2 | Page: número"
+- Contiene más registros de depuración
+
+#### Ejemplo de encabezado generado:
+```
+Header: Document: 23012025-MAT | Section: Título Principal > Subtítulo | Page: 3
+```
+
+### extract_embeddings_structured_headers.py
+
+Este script implementa mejoras en el procesamiento de encabezados:
+- Implementa un algoritmo de "encabezados abiertos"
+- Mantiene un seguimiento de la estructura jerárquica completa de encabezados
+- Implementa reglas específicas para la gestión de encabezados H1 (reinicia la jerarquía)
+- Preserva el formato Markdown original en los encabezados
+- Diferencia el tratamiento para el primer chunk vs. chunks subsecuentes
+
+#### Ejemplo de encabezado generado:
+```
+# Document: 23012025-MAT | page: 3
+## Título Principal
+### Subtítulo
+```
+
+Esta versión alternativa representa con mayor fidelidad la estructura jerárquica del documento, mejorando la calidad de los embeddings y la precisión de las búsquedas semánticas.
+
 ## Limitaciones y consideraciones
 
 - El sistema depende de la correcta identificación de marcadores de página en formato {número}-----
@@ -317,4 +451,3 @@ En el modo interactivo, el sistema mostrará un prompt para ingresar consultas y
 - Requiere una API key válida de Google para utilizar Gemini 2.0
 - La visualización de resultados está optimizada para terminal con formato de texto
 - El rendimiento puede verse afectado cuando la base de datos contiene muchos documentos
-- El sistema de logging facilita la depuración y seguimiento del procesamiento
