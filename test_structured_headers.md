@@ -1,3 +1,4 @@
+{0}------------------------------------------------
 # Documento de Prueba - Headers Estructurados
 
 Este es un documento de prueba para demostrar la funcionalidad de headers estructurados.
@@ -14,7 +15,7 @@ Contenido de la subsección A.
 
 Información específica sobre esta subsección.
 
-{2}-----
+{1}-----
 
 ## Segunda Sección
 
@@ -24,7 +25,7 @@ Esta es la segunda sección que aparece en la página 2.
 
 Contenido de la subsección B en la página 2.
 
-{3}-----
+{2}-----
 
 ### Subsección C
 
@@ -37,3 +38,5 @@ Información adicional en la página 3.
 ## Tercera Sección Principal
 
 Una nueva sección principal que comienza en la página 3.
+
+{3}-----
