@@ -15,26 +15,24 @@ NEW FEATURES:
 - Debug output files for manual inspection
 
 Usage:
-python extract_embeddings.py /path/to/markdown/files
+python extract_embeddings.py /path/to/markdown/files [--verbose]
 """
 
 import os
 import re
 import logging
 from datetime import datetime
+from typing import Union, Tuple, Dict
 
 import typer
 from fastlite import database
 from sqlite_vec import load
 from sentence_transformers import SentenceTransformer
-from tokenizers import Tokenizer
 from tqdm import tqdm
 
-# -----------------------------------------------------
-# Logging system configuration
-# -----------------------------------------------------
+
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,  
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("dof_processing.log"),
@@ -44,8 +42,6 @@ logging.basicConfig(
 logger = logging.getLogger("dof_embeddings")
 
 # %%
-
-tokenizer = Tokenizer.from_pretrained("nomic-ai/modernbert-embed-base")
 
 # Model configuration
 model = SentenceTransformer("nomic-ai/modernbert-embed-base", trust_remote_code=True)
@@ -71,19 +67,14 @@ db.t.chunks.create(
     header=str,
     embedding=bytes,
     created_at=datetime,
-    pk="id",    foreign_keys=[("document_id", "documents")],
+    pk="id",
+    foreign_keys=[("document_id", "documents")],
     ignore=True,
 )
 
-# -----------------------------------------------------
-# Header pattern (Markdown)
-# -----------------------------------------------------
 HEADING_PATTERN = re.compile(r'^(#{1,6})\s+(.*)$')
 
-# -----------------------------------------------------
-# Header processing functions
-# -----------------------------------------------------
-def get_heading_level(line: str):
+def get_heading_level(line: str) -> Union[Tuple[int, str], Tuple[None, None]]:
     """
     Returns the heading level and text,
     or (None, None) if the line is not a heading.
@@ -97,65 +88,64 @@ def get_heading_level(line: str):
     return None, None
 
 
-def update_open_headings(open_headings, line):
+def update_open_headings_dict(open_headings: Dict[int, str], line: str) -> Dict[int, str]:
     """
-    Updates the list of open headings according to the line.
+    Updates the dictionary of open headings according to the line.
     
-    - If an H1 is found, the list is reset.
-    - If the line is a heading of level >1:
-        * If the list is empty, it is added.
-        * If the last open heading has a lower or equal level,
-          it is added without removing the previous one (to preserve siblings).
-        * If the new heading is of a higher level (lower number)
-          than the last one, those with a level lower than the new one
-          are preserved and the heading is added.
+    - If an H1 is found, all previous headings are removed.
+    - If a heading of any level is found, all lower priority headings (higher numbers) 
+      are removed and the current one is added or updated.
+    - If no heading is found, the dictionary remains unchanged.
+    
+    Args:
+        open_headings: Current dictionary of headings (level -> text)
+        line: The line to check for headings
+        
+    Returns:
+        Updated dictionary of headings
     """
     lvl, txt = get_heading_level(line)
     if lvl is None:
-        # Line without heading, state is not modified
+        # No heading in this line
         return open_headings
-
+    
     if lvl == 1:
-        # An H1 closes all previous context.
-        return [(1, txt)]
+        # H1 resets all context
+        logger.debug(f"H1 heading found: '{txt}'. Resetting heading context")
+        return {1: txt}
     else:
-        if not open_headings:
-            return [(lvl, txt)]
-        else:
-            # If the last heading has a lower or equal level, the current one is added.
-            if open_headings[-1][0] <= lvl:
-                open_headings.append((lvl, txt))
-            else:
-                # If the new heading is of a higher level (more important)
-                # only headings that are of a lower level (higher) than the new one are preserved.
-                new_chain = [item for item in open_headings if item[0] < lvl]
-                new_chain.append((lvl, txt))
-                open_headings = new_chain
-        return open_headings
+        # Create copy to avoid modifying the original
+        new_headings = {k: v for k, v in open_headings.items() if k < lvl}
+        new_headings[lvl] = txt
+        logger.debug(f"H{lvl} heading found: '{txt}'. Updating context")
+        return new_headings
 
 
-def build_header(doc_title: str, page: str, open_headings: list, chunk_number: int):
+def build_header_dict(doc_title: str, page: str, open_headings: Dict[int, str]) -> str:
     """
     Builds the chunk header with the format:
     
     # Document: <Document Name> | page: <Page Number>
+    ## Heading Level 2
+    ### Heading Level 3
+    ...
     
-    Additionally, in chunk #1 the first detected heading is added (if it exists),
-    while in other chunks all open headings are listed in order.
+    The headings are listed in order of level (H1, H2, H3, etc.)
+    
+    Args:
+        doc_title: Title of the document
+        page: Page number
+        open_headings: Dictionary of open headings (level -> text)
+        
+    Returns:
+        Formatted header as a string
     """
     header_lines = [f"# Document: {doc_title} | page: {page}"]
-
-    if chunk_number == 1:
-        if open_headings:
-            # For the first chunk, only the first detected heading is included.
-            top_level, top_text = open_headings[0]
-            hashes = "#" * top_level
-            header_lines.append(f"{hashes} {top_text}")
-    else:
-        for (lvl, txt) in open_headings:
-            hashes = "#" * lvl
-            header_lines.append(f"{hashes} {txt}")
-
+    
+    for level in sorted(open_headings.keys()):
+        text = open_headings[level]
+        header_lines.append(f"{'#' * level} {text}")
+    
     return "\n".join(header_lines)
 
 
@@ -183,6 +173,7 @@ def split_text_by_page_break(text: str):
         final_page = last_page if last_page else "1"
         chunks.append({"text": remaining, "page": final_page})
 
+    logger.debug(f"Document split into {len(chunks)} chunks based on page markers")
     return chunks
 
 # %%
@@ -208,13 +199,13 @@ def get_url_from_filename(filename: str):
     """
     # Extract just the base filename in case the full path was passed
     base_filename = os.path.basename(filename).replace(".md", "")
-
+    
     # The year should be extracted from the filename (positions 4-8 in 23012025-MAT.pdf)
     # This assumes the format is consistent
     if len(base_filename) >= 8:
         year = base_filename[4:8]  # Extract year (2025 from 23012025-MAT.pdf)
         pdf_filename = f"{base_filename}.pdf"  # Add .pdf extension back
-
+        
         # Construct the URL
         url = f"https://diariooficial.gob.mx/abrirPDF.php?archivo={pdf_filename}&anio={year}&repo=repositorio/"
         return url
@@ -223,7 +214,7 @@ def get_url_from_filename(filename: str):
         raise ValueError(f"Expected filename like 23012025-MAT.md but got {filename}")
 
 
-def process_file(file_path):
+def process_file(file_path, verbose: bool = False):
     """
     Process a markdown file with structured headers support.
     This function:
@@ -235,113 +226,169 @@ def process_file(file_path):
     6. Generates contextual headers for each chunk
     7. Generates vector embeddings for each chunk (including header)
     8. Stores chunks and embeddings in the database
-    9. Creates a debug file for manual inspection
+    9. Creates a debug file for manual inspection (only if verbose=True)
 
     Args:
         file_path (str): Path to the markdown file to process
+        verbose (bool): If True, creates debug chunks file
     """
-    with open(file_path, "r", encoding="utf-8") as file:
-        content = file.read()
+    try:
+        with open(file_path, "r", encoding="utf-8") as file:
+            content = file.read()
 
-    title = os.path.splitext(os.path.basename(file_path))[0]
-    url = get_url_from_filename(file_path)
-    logger.debug(f"Processing file '{file_path}' with title '{title}'")
+        title = os.path.splitext(os.path.basename(file_path))[0]
+        url = get_url_from_filename(file_path)
+        logger.debug(f"Processing file '{file_path}' with title '{title}'")
 
-    # Delete any existing document with the same URL to avoid duplicates
-    db.t.documents.delete_where("url = ?", [url])
-    doc = db.t.documents.insert(
-        title=title,
-        url=url,
-        file_path=file_path,
-        created_at=datetime.now()
-    )
+        # Delete any existing document with the same URL to avoid duplicates
+        db.t.documents.delete_where("url = ?", [url])
+        doc = db.t.documents.insert(
+            title=title,
+            url=url,
+            file_path=file_path,
+            created_at=datetime.now()
+        )
 
-    # Divide the content into chunks based on page breaks
-    if re.search(r'\{\d+\}\s*-{5,}', content):
-        page_chunks = split_text_by_page_break(content)
-    else:
-        page_chunks = [{"text": content, "page": "1"}]
+        # Divide the content into chunks based on page breaks
+        if re.search(r'\{\d+\}\s*-{5,}', content):
+            page_chunks = split_text_by_page_break(content)
+        else:
+            page_chunks = [{"text": content, "page": "1"}]
+            logger.debug("No page markers found. Processing as a single-page document.")
 
-    chunks_file_path = os.path.splitext(file_path)[0] + "_chunks.txt"
-    open_headings = []  # List of (level, text) that are "open"
-    chunk_counter = 0
+        open_headings_dict = {}  # Dictionary of (level -> text) that are "open"
+        chunk_counter = 0
+        chunks_file = None
+        chunks_file_path = None
+        
+        if verbose:
+            chunks_file_path = os.path.splitext(file_path)[0] + "_chunks.txt"
+            chunks_file = open(chunks_file_path, "w", encoding="utf-8")
+        
+        try:
+            for chunk in page_chunks:
+                chunk_counter += 1
+                chunk_text = chunk["text"]
+                page_number = chunk["page"]
 
-    with open(chunks_file_path, "w", encoding="utf-8") as chunks_file:
-        for chunk in page_chunks:
-            chunk_counter += 1
-            chunk_text = chunk["text"]
-            page_number = chunk["page"]
-
-            # For the first chunk, pre-read the lines until the first heading is obtained.
-            if chunk_counter == 1:
-                lines = chunk_text.splitlines()
-                initial_headings = []
-                for line in lines:
-                    lvl, txt = get_heading_level(line)
-                    if lvl is not None:
-                        initial_headings.append((lvl, txt))
-                        # If the first heading is H1, we stop the pre-reading.
-                        if lvl == 1:
+                # For the first chunk, pre-read the lines until the first heading is obtained.
+                if chunk_counter == 1:
+                    lines = chunk_text.splitlines()
+                    for line in lines:
+                        lvl, txt = get_heading_level(line)
+                        if lvl is not None:
+                            # Update headings dictionary directly
+                            open_headings_dict = update_open_headings_dict(open_headings_dict, line)
+                            # If the first heading is H1, we stop the pre-reading.
+                            if lvl == 1:
+                                break
+                        else:
+                            # Stop if the first line that is not a heading is found.
                             break
-                    else:
-                        # Stop if the first line that is not a heading is found.
-                        break
-                if initial_headings:
-                    open_headings = initial_headings.copy()
 
-            # Build the header using the "open" headings at the beginning of the chunk.
-            header = build_header(title, page_number, open_headings, chunk_counter)
+                # Build the header using the "open" headings at the beginning of the chunk.
+                header = build_header_dict(title, page_number, open_headings_dict)
 
-            # Prepare text to generate the embedding.
-            text_for_embedding = f"{header}\n\n{chunk_text}"
-            embedding = model.encode(f"search_document: {text_for_embedding}")
+                # Prepare text to generate the embedding.
+                text_for_embedding = f"{header}\n\n{chunk_text}"
+                
+                try:
+                    embedding = model.encode(f"search_document: {text_for_embedding}")
+                except Exception as e:
+                    logger.error(f"Error generating embedding for chunk #{chunk_counter} of {file_path}: {str(e)}")
+                    raise
 
-            # Write the chunk details to the _chunks.txt file.
-            chunks_file.write(f"--- CHUNK #{chunk_counter} ---\n")
-            chunks_file.write(f"Header:\n{header}\n\n")
-            chunks_file.write(f"Text:\n{chunk_text}\n")
-            chunks_file.write("\n" + "-"*50 + "\n\n")
+                # Write the chunk details to the _chunks.txt file (only if verbose).
+                if verbose and chunks_file:
+                    chunks_file.write(f"--- CHUNK #{chunk_counter} ---\n")
+                    chunks_file.write(f"Header:\n{header}\n\n")
+                    chunks_file.write(f"Text:\n{chunk_text}\n")
+                    chunks_file.write("\n" + "-"*50 + "\n\n")
 
-            # Save the chunk in the database.
-            db.t.chunks.insert(
-                document_id=doc["id"],
-                text=chunk_text,
-                header=header,
-                embedding=embedding,
-                created_at=datetime.now(),
-            )
+                # Save the chunk in the database.
+                db.t.chunks.insert(
+                    document_id=doc["id"],
+                    text=chunk_text,
+                    header=header,
+                    embedding=embedding,
+                    created_at=datetime.now(),
+                )
 
-            # Update the state of open headings for the following chunks.
-            lines = chunk_text.splitlines()
-            for line in lines:
-                open_headings = update_open_headings(open_headings, line)
+                # Update the state of open headings for the following chunks.
+                lines = chunk_text.splitlines()
+                for line in lines:
+                    open_headings_dict = update_open_headings_dict(open_headings_dict, line)
 
-    logger.info(f"Processing completed for: {file_path}")
-    logger.info(f"Chunks file generated at: {chunks_file_path}")
+        finally:
+            if chunks_file:
+                chunks_file.close()
+        
+        logger.info(f"Processing completed for: {file_path}")
+        if verbose and chunks_file_path:
+            logger.info(f"Chunks file generated at: {chunks_file_path}")
+        
+    except Exception as e:
+        logger.error(f"Error processing file {file_path}: {str(e)}")
+        raise
 
 
-def process_directory(directory_path):
+def process_directory(directory_path, verbose: bool = False):
     """
     Recursively process all files in a directory and its subdirectories.
 
     Args:
         directory_path (str): Path to the directory to process
+        verbose (bool): If True, creates debug chunks files
     """
-    # Loop through all entries in the directory
-    for entry in tqdm(os.listdir(directory_path), desc=f"Processing {directory_path}"):
-        # Create full path
-        entry_path = os.path.join(directory_path, entry)
+    try:
+        # Get the list of files in the directory
+        entries = os.listdir(directory_path)
+        md_files = [entry for entry in entries if entry.lower().endswith(".md")]
+        logger.info(f"Found {len(md_files)} markdown files in {directory_path}")
+        
+        # Loop through all entries in the directory
+        for entry in tqdm(entries, desc=f"Processing {directory_path}"):
+            # Create full path
+            entry_path = os.path.join(directory_path, entry)
 
-        # If it's a file, process it
-        if os.path.isfile(entry_path) and entry_path.lower().endswith(".md"):
-            process_file(entry_path)
-        # If it's a directory, recursively process it
-        elif os.path.isdir(entry_path):
-            process_directory(entry_path)
+            # If it's a file, process it
+            if os.path.isfile(entry_path) and entry_path.lower().endswith(".md"):
+                process_file(entry_path, verbose=verbose)
+            # If it's a directory, recursively process it
+            elif os.path.isdir(entry_path):
+                process_directory(entry_path, verbose=verbose)
+                
+        logger.info(f"Processing completed for directory: {directory_path}")
+    except Exception as e:
+        logger.error(f"Error processing directory {directory_path}: {str(e)}")
+        raise
 
 
-def main(root_dir: str):
-    process_directory(root_dir)
+def main(root_dir: str, verbose: bool = False):
+    """
+    Process all markdown files in a directory and its subdirectories.
+    
+    Args:
+        root_dir (str): Root directory to search for markdown files
+        verbose (bool, optional): If True, shows detailed debug messages. Default is False.
+    """
+    # Configure logging level based on verbose parameter
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Verbose mode activated - showing detailed debug messages")
+    else:
+        logger.setLevel(logging.INFO)
+        
+    logger.info(f"Starting document processing in: {root_dir}")
+    start_time = datetime.now()
+    
+    try:
+        process_directory(root_dir, verbose=verbose)
+        elapsed_time = datetime.now() - start_time
+        logger.info(f"Processing completed in {elapsed_time}")
+    except Exception as e:
+        logger.error(f"Error in processing: {str(e)}")
+        raise
 
 
 if __name__ == "__main__":
