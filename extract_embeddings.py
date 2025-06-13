@@ -214,6 +214,234 @@ def get_url_from_filename(filename: str):
         raise ValueError(f"Expected filename like 23012025-MAT.md but got {filename}")
 
 
+def _prepare_document_metadata(file_path: str) -> tuple:
+    """
+    Extract metadata from the file.
+    
+    Args:
+        file_path (str): Path to the markdown file
+        
+    Returns:
+        tuple: (content, title, url)
+    """
+    with open(file_path, "r", encoding="utf-8") as file:
+        content = file.read()
+
+    title = os.path.splitext(os.path.basename(file_path))[0]
+    url = get_url_from_filename(file_path)
+    logger.debug(f"Processing file '{file_path}' with title '{title}'")
+    
+    return content, title, url
+
+
+def _setup_database_document(title: str, url: str, file_path: str) -> dict:
+    """
+    Configure document in database.
+    
+    Args:
+        title (str): Document title
+        url (str): Document URL
+        file_path (str): Path to the document file
+        
+    Returns:
+        dict: Document record
+    """
+    # Delete any existing document with the same URL to avoid duplicates
+    db.t.documents.delete_where("url = ?", [url])
+    doc = db.t.documents.insert(
+        title=title,
+        url=url,
+        file_path=file_path,
+        created_at=datetime.now()
+    )
+    return doc
+
+
+def _prepare_page_chunks(content: str) -> list:
+    """
+    Divide content into chunks based on page breaks.
+    
+    Args:
+        content (str): Document content
+        
+    Returns:
+        list: List of page chunks
+    """
+    if re.search(r'\{\d+\}\s*-{5,}', content):
+        page_chunks = split_text_by_page_break(content)
+    else:
+        page_chunks = [{"text": content, "page": "1"}]
+        logger.debug("No page markers found. Processing as a single-page document.")
+    return page_chunks
+
+
+def _initialize_chunk_processing(file_path: str, verbose: bool) -> tuple:
+    """
+    Initialize variables for chunk processing.
+    
+    Args:
+        file_path (str): Path to the file
+        verbose (bool): If True, creates debug chunks file
+        
+    Returns:
+        tuple: (open_headings_dict, chunks_file, chunks_file_path)
+    """
+    open_headings_dict = {}  # Dictionary of (level -> text) that are "open"
+    chunks_file = None
+    chunks_file_path = None
+    
+    if verbose:
+        chunks_file_path = os.path.splitext(file_path)[0] + "_chunks.txt"
+        chunks_file = open(chunks_file_path, "w", encoding="utf-8")
+    
+    return open_headings_dict, chunks_file, chunks_file_path
+
+
+def _process_first_chunk_headers(chunk_text: str, open_headings_dict: dict) -> dict:
+    """
+    Pre-read the first chunk to extract initial headers.
+    
+    Args:
+        chunk_text (str): Text of the first chunk
+        open_headings_dict (dict): Dictionary of open headings
+        
+    Returns:
+        dict: Updated open_headings_dict
+    """
+    lines = chunk_text.splitlines()
+    for line in lines:
+        lvl, txt = get_heading_level(line)
+        if lvl is not None:
+            # Update headings dictionary directly
+            open_headings_dict = update_open_headings_dict(open_headings_dict, line)
+            # If the first heading is H1, we stop the pre-reading.
+            if lvl == 1:
+                break
+        else:
+            # Stop if the first line that is not a heading is found.
+            break
+    return open_headings_dict
+
+
+def _generate_chunk_embedding(header: str, chunk_text: str, file_path: str, chunk_counter: int) -> bytes:
+    """
+    Generate embedding for a chunk.
+    
+    Args:
+        header (str): Chunk header
+        chunk_text (str): Chunk text
+        file_path (str): Path to the file (for error logging)
+        chunk_counter (int): Chunk counter (for error logging)
+        
+    Returns:
+        bytes: Embedding vector
+    """
+    text_for_embedding = f"{header}\n\n{chunk_text}"
+    
+    try:
+        embedding = model.encode(f"search_document: {text_for_embedding}")
+        return embedding
+    except Exception as e:
+        logger.error(f"Error generating embedding for chunk #{chunk_counter} of {file_path}: {str(e)}")
+        raise
+
+
+def _write_debug_chunk(chunks_file, chunk_counter: int, header: str, chunk_text: str):
+    """
+    Write chunk details to debug file.
+    
+    Args:
+        chunks_file: File object for writing debug info
+        chunk_counter (int): Chunk counter
+        header (str): Chunk header
+        chunk_text (str): Chunk text
+    """
+    if chunks_file:
+        chunks_file.write(f"--- CHUNK #{chunk_counter} ---\n")
+        chunks_file.write(f"Header:\n{header}\n\n")
+        chunks_file.write(f"Text:\n{chunk_text}\n")
+        chunks_file.write("\n" + "-"*50 + "\n\n")
+
+
+def _save_chunk_to_database(doc_id: int, chunk_text: str, header: str, embedding: bytes):
+    """
+    Save chunk in database.
+    
+    Args:
+        doc_id (int): Document ID
+        chunk_text (str): Chunk text
+        header (str): Chunk header
+        embedding (bytes): Chunk embedding
+    """
+    db.t.chunks.insert(
+        document_id=doc_id,
+        text=chunk_text,
+        header=header,
+        embedding=embedding,
+        created_at=datetime.now(),
+    )
+
+
+def _update_headers_state(chunk_text: str, open_headings_dict: dict) -> dict:
+    """
+    Update state of headers after processing chunk.
+    
+    Args:
+        chunk_text (str): Chunk text
+        open_headings_dict (dict): Dictionary of open headings
+        
+    Returns:
+        dict: Updated open_headings_dict
+    """
+    lines = chunk_text.splitlines()
+    for line in lines:
+        open_headings_dict = update_open_headings_dict(open_headings_dict, line)
+    return open_headings_dict
+
+
+def _process_single_chunk(chunk: dict, chunk_counter: int, title: str, open_headings_dict: dict, doc_id: int, chunks_file, verbose: bool, file_path: str) -> dict:
+    """
+    Process a single chunk.
+    
+    Args:
+        chunk (dict): Chunk data
+        chunk_counter (int): Chunk counter
+        title (str): Document title
+        open_headings_dict (dict): Dictionary of open headings
+        doc_id (int): Document ID
+        chunks_file: File object for debug info
+        verbose (bool): If True, writes debug info
+        file_path (str): Path to the file (for error logging)
+        
+    Returns:
+        dict: Updated open_headings_dict
+    """
+    chunk_text = chunk["text"]
+    page_number = chunk["page"]
+
+    # For the first chunk, pre-read the lines until the first heading is obtained.
+    if chunk_counter == 1:
+        open_headings_dict = _process_first_chunk_headers(chunk_text, open_headings_dict)
+
+    # Build the header using the "open" headings at the beginning of the chunk.
+    header = build_header_dict(title, page_number, open_headings_dict)
+
+    # Generate embedding
+    embedding = _generate_chunk_embedding(header, chunk_text, file_path, chunk_counter)
+
+    # Write debug info if verbose
+    if verbose:
+        _write_debug_chunk(chunks_file, chunk_counter, header, chunk_text)
+
+    # Save to database
+    _save_chunk_to_database(doc_id, chunk_text, header, embedding)
+
+    # Update headers state
+    open_headings_dict = _update_headers_state(chunk_text, open_headings_dict)
+    
+    return open_headings_dict
+
+
 def process_file(file_path, verbose: bool = False):
     """
     Process a markdown file with structured headers support.
@@ -233,96 +461,32 @@ def process_file(file_path, verbose: bool = False):
         verbose (bool): If True, creates debug chunks file
     """
     try:
-        with open(file_path, "r", encoding="utf-8") as file:
-            content = file.read()
-
-        title = os.path.splitext(os.path.basename(file_path))[0]
-        url = get_url_from_filename(file_path)
-        logger.debug(f"Processing file '{file_path}' with title '{title}'")
-
-        # Delete any existing document with the same URL to avoid duplicates
-        db.t.documents.delete_where("url = ?", [url])
-        doc = db.t.documents.insert(
-            title=title,
-            url=url,
-            file_path=file_path,
-            created_at=datetime.now()
-        )
-
-        # Divide the content into chunks based on page breaks
-        if re.search(r'\{\d+\}\s*-{5,}', content):
-            page_chunks = split_text_by_page_break(content)
-        else:
-            page_chunks = [{"text": content, "page": "1"}]
-            logger.debug("No page markers found. Processing as a single-page document.")
-
-        open_headings_dict = {}  # Dictionary of (level -> text) that are "open"
-        chunk_counter = 0
-        chunks_file = None
-        chunks_file_path = None
+        # 1. Prepare metadata
+        content, title, url = _prepare_document_metadata(file_path)
         
-        if verbose:
-            chunks_file_path = os.path.splitext(file_path)[0] + "_chunks.txt"
-            chunks_file = open(chunks_file_path, "w", encoding="utf-8")
+        # 2. Setup document in database
+        doc = _setup_database_document(title, url, file_path)
+        
+        # 3. Prepare page chunks
+        page_chunks = _prepare_page_chunks(content)
+        
+        # 4. Initialize chunk processing
+        open_headings_dict, chunks_file, chunks_file_path = _initialize_chunk_processing(file_path, verbose)
         
         try:
+            # 5. Process each chunk
+            chunk_counter = 0
             for chunk in page_chunks:
                 chunk_counter += 1
-                chunk_text = chunk["text"]
-                page_number = chunk["page"]
-
-                # For the first chunk, pre-read the lines until the first heading is obtained.
-                if chunk_counter == 1:
-                    lines = chunk_text.splitlines()
-                    for line in lines:
-                        lvl, txt = get_heading_level(line)
-                        if lvl is not None:
-                            # Update headings dictionary directly
-                            open_headings_dict = update_open_headings_dict(open_headings_dict, line)
-                            # If the first heading is H1, we stop the pre-reading.
-                            if lvl == 1:
-                                break
-                        else:
-                            # Stop if the first line that is not a heading is found.
-                            break
-
-                # Build the header using the "open" headings at the beginning of the chunk.
-                header = build_header_dict(title, page_number, open_headings_dict)
-
-                # Prepare text to generate the embedding.
-                text_for_embedding = f"{header}\n\n{chunk_text}"
-                
-                try:
-                    embedding = model.encode(f"search_document: {text_for_embedding}")
-                except Exception as e:
-                    logger.error(f"Error generating embedding for chunk #{chunk_counter} of {file_path}: {str(e)}")
-                    raise
-
-                # Write the chunk details to the _chunks.txt file (only if verbose).
-                if verbose and chunks_file:
-                    chunks_file.write(f"--- CHUNK #{chunk_counter} ---\n")
-                    chunks_file.write(f"Header:\n{header}\n\n")
-                    chunks_file.write(f"Text:\n{chunk_text}\n")
-                    chunks_file.write("\n" + "-"*50 + "\n\n")
-
-                # Save the chunk in the database.
-                db.t.chunks.insert(
-                    document_id=doc["id"],
-                    text=chunk_text,
-                    header=header,
-                    embedding=embedding,
-                    created_at=datetime.now(),
+                open_headings_dict = _process_single_chunk(
+                    chunk, chunk_counter, title, open_headings_dict, 
+                    doc["id"], chunks_file, verbose, file_path
                 )
-
-                # Update the state of open headings for the following chunks.
-                lines = chunk_text.splitlines()
-                for line in lines:
-                    open_headings_dict = update_open_headings_dict(open_headings_dict, line)
-
         finally:
             if chunks_file:
                 chunks_file.close()
         
+        # 6. Final logging
         logger.info(f"Processing completed for: {file_path}")
         if verbose and chunks_file_path:
             logger.info(f"Chunks file generated at: {chunks_file_path}")
