@@ -7,7 +7,7 @@ capabilities. It supports multiple AI providers through direct command-line flag
 
 Usage:
     python extract_captions.py --root-dir /path/to/images --db-path captions.db
-    python extract_captions.py --root-dir /path/to/images --openai --batch-size 20
+    python extract_captions.py --root-dir /path/to/images --openai
     python extract_captions.py --root-dir /path/to/images --gemini
     python extract_captions.py --root-dir /path/to/images --claude
 """
@@ -15,16 +15,16 @@ Usage:
 import argparse
 import json
 import os
-import sys
 import signal
+import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
+
 from dotenv import load_dotenv
 
 # Import colorama for cross-platform colored output
 try:
-    import colorama
-    from colorama import Fore, Back, Style, init
+    from colorama import Fore, Style, init
     # Initialize colorama for Windows compatibility
     init(autoreset=True)
     COLORAMA_AVAILABLE = True
@@ -195,9 +195,11 @@ class CaptionExtractor:
             else:
                 client.set_api_key(api_key)
             
-            # Set custom prompt if provided
-            if 'prompt' in self.config:
-                client.set_prompt(self.config['prompt'])
+            # Set prompt from config - required field
+            prompt = self.config.get('prompt')
+            if not prompt:
+                raise ValueError("Prompt must be defined in config.json")
+            client.set_prompt(prompt)
             
             # Set error handler for the client
             client.set_error_handler(self.error_handler)
@@ -443,14 +445,8 @@ def create_default_config() -> Dict[str, Any]:
             'max_tokens': 256,
             'temperature': 0.6,
             'top_p': 0.6
-        },
-        'prompt': """Resume brevemente la imagen en español (máximo 3-4 oraciones por categoría):
-- **Texto:** Menciona solo el título y 2-3 puntos clave si hay texto.
-- **Mapas:** Identifica la región principal y máximo 2-3 ubicaciones relevantes.
-- **Diagramas:** Resume el concepto central en 1-2 oraciones.
-- **Logos:** Identifica la entidad y sus características distintivas.
-- **Datos visuales:** Menciona solo los 2-3 valores o tendencias más importantes.
-Prioriza la información esencial sobre los detalles, manteniendo la descripción breve y directa."""
+        }
+        # Prompt will be loaded from config.json
     }
 
 # Load environment variables from .env file
@@ -489,8 +485,6 @@ Examples:
     provider_group.add_argument('--ollama', action='store_true', help='Use Ollama provider')
     provider_group.add_argument('--azure', action='store_true', help='Use Azure OpenAI provider')
     
-    parser.add_argument('--api-key', type=str, help='API key for the AI provider')
-
     parser.add_argument('--force-reprocess', action='store_true', 
                        help='Reprocess images even if descriptions exist')
     parser.add_argument('--status', action='store_true', help='Show system status and exit')
@@ -540,10 +534,6 @@ Examples:
                 os.makedirs(db_dir, exist_ok=True)
             else:
                 config['db_path'] = args.db_path
-        if args.api_key:
-            # Import OpenAIClient to use clean_api_key method
-            from clients.openai import OpenAIClient
-            config['api_key'] = OpenAIClient.clean_api_key(args.api_key)
 
         if args.log_level:
             log_levels = {'DEBUG': 10, 'INFO': 20, 'WARNING': 30, 'ERROR': 40}
@@ -590,7 +580,7 @@ Examples:
                 sys.exit(1)
         
         # Initialize extractor for normal operation
-        print_header(f"🚀 Starting Caption Extraction", Fore.GREEN)
+        print_header("🚀 Starting Caption Extraction", Fore.GREEN)
         print_info("Provider", provider, Fore.CYAN)
         print_info("Model", config.get('client_config', {}).get('model', 'Not specified'), Fore.CYAN)
         print_info("Base URL", config.get('client_config', {}).get('base_url', 'Default'), Fore.CYAN)
@@ -606,9 +596,9 @@ Examples:
         print_info("Starting caption extraction", "Processing images...", Fore.GREEN)
         results = extractor.extract_captions(force_reprocess=args.force_reprocess)
         
-        # Print results with colored formatting
+        # Display results with appropriate formatting based on status
         if results['status'] in ['completed', 'interrupted']:
-            # Only print stats if we have results data
+            # Display statistics if processing results are available
             if 'results' in results:
                 print_stats(results['results'])
             else:
@@ -617,7 +607,7 @@ Examples:
                 print_warning("Processing was interrupted")
         else:
             print_error(f"Error during processing: {results.get('error', 'Unknown error')}")
-            # Show simplified error summary instead of full report
+            # Display error summary for troubleshooting
             if 'error_summary' in results:
                 error_summary = results['error_summary']
                 if error_summary.get('total_errors', 0) > 0:

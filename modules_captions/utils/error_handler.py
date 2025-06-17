@@ -1,11 +1,10 @@
+import json
 import logging
 import os
-import json
 import traceback
-from typing import Dict, Any, Optional, List
 from datetime import datetime
 from pathlib import Path
-import sys
+from typing import Dict, Any, Optional
 
 class ErrorHandler:
     """
@@ -28,7 +27,7 @@ class ErrorHandler:
         self.log_dir = Path(log_dir)
         self.debug_mode = debug_mode
         
-        # Crear directorio de logs y subdirectorios si no existen
+        # Create log directory and subdirectories if they don't exist
         self.log_dir.mkdir(exist_ok=True, parents=True)
         
         # Error tracking

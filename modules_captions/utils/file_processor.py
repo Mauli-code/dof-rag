@@ -1,10 +1,9 @@
-import os
 import json
-import time
 import logging
-from typing import List, Dict, Any, Optional, Tuple
-from pathlib import Path
 import re
+import time
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Tuple
 
 try:
     from tqdm import tqdm
@@ -131,7 +130,7 @@ class FileProcessor:
         if self.debug_mode:
             self.logger.debug("🔍 Debug mode activated in FileProcessor")
             self.logger.debug(f"Root directory: {self.root_directory}")
-            self.logger.debug(f"Checkpoint directory: {self.checkpoint_dir}")
+            self.logger.debug(f"Log directory: {self.log_dir}")
             self.logger.debug(f"Commit interval: {self.commit_interval} images")
             self.logger.debug(f"Supported extensions: {self.image_extensions}")
     
@@ -514,48 +513,7 @@ class FileProcessor:
             self.logger.error(error_msg)
             self.stats['total_errors'] += len(descriptions)
     
-    def _process_batch(self, batch: List[Tuple[str, str, int, str]]) -> None:
-        """
-        Process a single batch of images (deprecated method, kept for compatibility).
-        
-        Args:
-            batch: List of image tuples to process.
-        """
-        self.logger.warning("_process_batch method is deprecated. Using sequential processing instead.")
-        
-        # Process each image in the batch sequentially
-        pending_descriptions = []
-        
-        for document_name, image_path, page_number, image_filename in batch:
-            if self.interrupted:
-                break
-            
-            try:
-                self.logger.debug(f"Processing {image_filename}")
-                
-                # Generate description
-                description = self.ai_client.describe(image_path)
-                
-                # Add to pending descriptions
-                pending_descriptions.append((document_name, page_number, image_filename, description))
-                
-                self.stats['total_processed'] += 1
-                self.logger.debug(f"Successfully processed {image_filename}")
-                
-            except Exception as e:
-                self.stats['total_errors'] += 1
-                self.logger.error(f"Error processing {image_filename}: {str(e)}")
-                
-                # Check for critical server errors
-                error_handler = getattr(self.ai_client, 'error_handler', None)
-                if error_handler and ('UNAVAILABLE' in str(e) or '503' in str(e) or '500' in str(e) or 'overloaded' in str(e).lower()):
-                    self.logger.critical(f"Detected server error: {str(e)}. Stopping processing.")
-                    self.interrupted = True
-                    break
-        
-        # Commit all descriptions from this batch
-        if pending_descriptions:
-            self._commit_descriptions(pending_descriptions)
+
     
     def _extract_document_info(self, image_path: Path) -> Tuple[str, int]:
         """

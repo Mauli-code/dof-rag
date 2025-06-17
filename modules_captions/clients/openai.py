@@ -1,12 +1,13 @@
-import os
-import time
-import threading
 import base64
-import logging
-from typing import Dict, Any, Optional, Tuple
-from PIL import Image
 import io
+import logging
+import os
+import threading
+import time
 from threading import Lock
+from typing import Dict, Any, Optional, Tuple
+
+from PIL import Image
 
 try:
     import openai
@@ -50,14 +51,8 @@ class OpenAIClient:
         self.top_p = top_p
         self.base_url = base_url
         
-        # Default prompt optimized for DOF documents
-        self.prompt = """Resume brevemente la imagen en español (máximo 3-4 oraciones por categoría):
-- **Texto:** Menciona solo el título y 2-3 puntos clave si hay texto.
-- **Mapas:** Identifica la región principal y máximo 2-3 ubicaciones relevantes.
-- **Diagramas:** Resume el concepto central en 1-2 oraciones.
-- **Logos:** Identifica la entidad y sus características distintivas.
-- **Datos visuales:** Menciona solo los 2-3 valores o tendencias más importantes.
-Prioriza la información esencial sobre los detalles, manteniendo la descripción breve y directa."""
+        # Default prompt will be set via set_prompt() method
+        self.prompt = None
         
         self._client = None
         self.error_handler = None
@@ -147,7 +142,7 @@ Prioriza la información esencial sobre los detalles, manteniendo la descripció
         if current_requests == warning_threshold and not hasattr(self, '_warning_shown_this_minute'):
             self._warning_shown_this_minute = True
             warning_msg = f"\n🟡 Rate limit warning: {current_requests}/{self.requests_per_minute} requests"
-            next_msg = f"   └─ Next request will trigger 60s cooling period"
+            next_msg = "   └─ Next request will trigger 60s cooling period"
             self.logger.warning(warning_msg)
             self.logger.info(next_msg)
         
@@ -171,7 +166,7 @@ Prioriza la información esencial sobre los detalles, manteniendo la descripció
             from tqdm import tqdm
             
             # Enhanced visual cooling progress with better formatting
-            cooling_desc = f"🧊 Rate limit cooling - Please wait"
+            cooling_desc = "🧊 Rate limit cooling - Please wait"
             with tqdm(total=cooling_seconds, desc=cooling_desc, unit="s",
                      bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}s [{elapsed}<{remaining}]',
                      ncols=100, leave=False, colour='blue') as pbar:

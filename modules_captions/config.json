@@ -12,7 +12,7 @@
   "commit_interval": 10,
   "log_level": 20,
   
-  "prompt": "Resume brevemente la imagen en español (máximo 3-4 oraciones por categoría):\n- **Texto:** Menciona solo el título y 2-3 puntos clave si hay texto.\n- **Mapas:** Identifica la región principal y máximo 2-3 ubicaciones relevantes.\n- **Diagramas:** Resume el concepto central en 1-2 oraciones.\n- **Logos:** Identifica la entidad y sus características distintivas.\n- **Datos visuales:** Menciona solo los 2-3 valores o tendencias más importantes.\nPrioriza la información esencial sobre los detalles, manteniendo la descripción breve y directa.",
+  "prompt": " Describe detalladamente la imagen en español con un estilo profesional y claro. La descripción se utilizará como contexto en un sistema RAG, por lo que debe ser precisa, relevante y útil para comprender la imagen incluso sin verla. Limita la respuesta a un máximo de 512 tokens. \n Resume la imagen según estas categorías, solo si aplican: \n Texto:  Extrae el título principal y hasta 3 ideas clave del contenido textual visible. Omite detalles superfluos. \n Mapas:  Identifica la región o país principal, y menciona hasta 3 ubicaciones clave, rutas o elementos geográficos destacados. \n Diagramas o esquemas:  Explica brevemente el concepto o proceso representado, incluyendo relaciones importantes entre elementos. \n Logos:  Nombra la entidad representada y describe los rasgos distintivos del logotipo (forma, colores, texto, íconos). \n Gráficas o datos visuales:  Señala los 2-3 datos más relevantes, tendencias o contrastes notables que permitan comprender rápidamente el mensaje. \n Mantén un lenguaje profesional y conciso. Evita redundancias, especulaciones o interpretaciones personales. Prioriza siempre la utilidad de la descripción como contexto adicional en un sistema de recuperación de información.",
   
   "providers": {
     "openai": {
@@ -97,13 +97,13 @@
   },
   
   "_configuration_notes": {
-    "root_dir": "Directorio raíz que contiene las imágenes a procesar",
-    "db_path": "Ruta al archivo de base de datos SQLite (se creará si no existe)",
+    "root_dir": "Root directory containing images to process",
+    "db_path": "Path to SQLite database file (will be created if it doesn't exist)",
     "provider": "Proveedor de IA: 'openai', 'gemini', 'claude', 'ollama', 'azure'",
     "api_key": "Clave API (null para usar variable de entorno)",
     
     "log_level": "Nivel de logging: 10=DEBUG, 20=INFO, 30=WARNING, 40=ERROR",
-    "providers": "Configuraciones específicas para cada proveedor de IA"
+    "providers": "Specific configurations for each AI provider"
   },
   
   "_environment_variables": {
