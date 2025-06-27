@@ -22,6 +22,11 @@ The script integrates image descriptions into the embedding process:
 - Appends relevant image descriptions to chunk text before embedding generation
 - Maintains backward compatibility when no image descriptions are available
 
+DATABASE:
+The system uses DuckDB for efficient embedding storage:
+- Native support for FLOAT[] arrays for embeddings
+- Unified database (dof_db/db.duckdb) for all data
+
 Usage:
 python extract_embeddings.py /path/to/markdown/files [--verbose]
 """
@@ -61,6 +66,7 @@ DB_FILE = "dof_db/db.duckdb"
 db_dir = os.path.dirname(DB_FILE)
 if db_dir:
     os.makedirs(db_dir, exist_ok=True)
+    logger.info(f"Asegurando que el directorio de la base de datos exista en: {db_dir}")
 
 # Database initialization and schema setup
 db = duckdb.connect(DB_FILE)
