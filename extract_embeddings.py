@@ -1,18 +1,26 @@
 # %%
-"""
-DOF Document Embedding Generator with Structured Headers
+"""DOF Document Embedding Extraction with Structured Headers and Image Integration
 
 This script processes markdown files from the Mexican Official Gazette (DOF),
 extracts their content with advanced header structure recognition, splits them 
 into page-based chunks maintaining hierarchical context, and generates vector
-embeddings for efficient semantic search. The embeddings are stored in a SQLite
-database with vector search capabilities.
+embeddings for storage. The embeddings are stored in a DuckDB database for
+later use by search and retrieval systems.
 
-NEW FEATURES:
+FEATURES:
 - Structured header detection and hierarchical context maintenance
 - Page-based chunking using {number}----- patterns
 - Contextual headers for improved embedding quality
+- Image descriptions integration for enhanced semantic context
+- Efficient embedding storage using DuckDB with FLOAT[] arrays
 - Debug output files for manual inspection
+
+IMAGE INTEGRATION:
+The script integrates image descriptions into the embedding process:
+- Uses existing image descriptions from the main database (dof_db/db.duckdb)
+- Associates image descriptions with document chunks by page number
+- Appends relevant image descriptions to chunk text before embedding generation
+- Maintains backward compatibility when no image descriptions are available
 
 Usage:
 python extract_embeddings.py /path/to/markdown/files [--verbose]
@@ -25,8 +33,7 @@ from datetime import datetime
 from typing import Union, Tuple, Dict
 
 import typer
-from fastlite import database
-from sqlite_vec import load
+import duckdb
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
@@ -47,30 +54,68 @@ logger = logging.getLogger("dof_embeddings")
 model = SentenceTransformer("nomic-ai/modernbert-embed-base", trust_remote_code=True)
 
 # %%
+# Database paths configuration
+DB_FILE = "dof_db/db.duckdb"
+
+# Ensure the database directory exists
+db_dir = os.path.dirname(DB_FILE)
+if db_dir:
+    os.makedirs(db_dir, exist_ok=True)
+
 # Database initialization and schema setup
-# Using SQLite with sqlite-vec extension for vector similarity search
-db = database("dof_db/db.sqlite")
-db.conn.enable_load_extension(True)
-load(db.conn)
-db.conn.enable_load_extension(False)
+db = duckdb.connect(DB_FILE)
+
+# Install and load VSS extension for vector similarity search
+db.execute("INSTALL vss;")
+db.execute("LOAD vss;")
+
+# Create sequences for auto-incrementing primary keys
+db.execute("CREATE SEQUENCE IF NOT EXISTS documents_id_seq START 1")
+db.execute("CREATE SEQUENCE IF NOT EXISTS chunks_id_seq START 1")
+db.execute("CREATE SEQUENCE IF NOT EXISTS image_descriptions_id_seq START 1")
 
 # Documents table: stores metadata about each document
-db.t.documents.create(
-    id=int, title=str, url=str, file_path=str, created_at=datetime, pk="id", ignore=True
-)
-db.t.documents.create_index(["url"], unique=True, if_not_exists=True)
+db.execute("""
+    CREATE TABLE IF NOT EXISTS documents (
+        id INTEGER PRIMARY KEY DEFAULT nextval('documents_id_seq'),
+        title VARCHAR,
+        url VARCHAR UNIQUE,
+        file_path VARCHAR,
+        created_at TIMESTAMP
+    )
+""")
 
-db.t.chunks.create(
-    id=int,
-    document_id=int,
-    text=str,
-    header=str,
-    embedding=bytes,
-    created_at=datetime,
-    pk="id",
-    foreign_keys=[("document_id", "documents")],
-    ignore=True,
-)
+# Chunks table: stores document chunks with embeddings
+db.execute("""
+    CREATE TABLE IF NOT EXISTS chunks (
+        id INTEGER PRIMARY KEY DEFAULT nextval('chunks_id_seq'),
+        document_id INTEGER,
+        text VARCHAR,
+        header VARCHAR,
+        embedding FLOAT[768],
+        created_at TIMESTAMP,
+        FOREIGN KEY (document_id) REFERENCES documents(id)
+    )
+""")
+
+# Image descriptions table: stores image descriptions for integration with embeddings
+db.execute("""
+    CREATE TABLE IF NOT EXISTS image_descriptions (
+        id INTEGER PRIMARY KEY DEFAULT nextval('image_descriptions_id_seq'),
+        document_name VARCHAR,
+        page_number INTEGER,
+        image_filename VARCHAR,
+        description VARCHAR,
+        created_at TIMESTAMP,
+        updated_at TIMESTAMP
+    )
+""")
+
+# Create index on image_descriptions for faster lookups
+db.execute("""
+    CREATE INDEX IF NOT EXISTS image_descriptions_lookup_idx 
+    ON image_descriptions (document_name, page_number)
+""")
 
 HEADING_PATTERN = re.compile(r'^(#{1,6})\s+(.*)$')
 
@@ -86,7 +131,6 @@ def get_heading_level(line: str) -> Union[Tuple[int, str], Tuple[None, None]]:
         level = len(hashes)
         return level, heading_text
     return None, None
-
 
 def update_open_headings_dict(open_headings: Dict[int, str], line: str) -> Dict[int, str]:
     """
@@ -120,7 +164,6 @@ def update_open_headings_dict(open_headings: Dict[int, str], line: str) -> Dict[
         logger.debug(f"H{lvl} heading found: '{txt}'. Updating context")
         return new_headings
 
-
 def build_header_dict(doc_title: str, page: str, open_headings: Dict[int, str]) -> str:
     """
     Builds the chunk header with the format:
@@ -147,7 +190,6 @@ def build_header_dict(doc_title: str, page: str, open_headings: Dict[int, str]) 
         header_lines.append(f"{'#' * level} {text}")
     
     return "\n".join(header_lines)
-
 
 def split_text_by_page_break(text: str):
     """
@@ -177,7 +219,6 @@ def split_text_by_page_break(text: str):
     return chunks
 
 # %%
-
 
 def get_url_from_filename(filename: str):
     """
@@ -213,7 +254,6 @@ def get_url_from_filename(filename: str):
         # Return None or an error message if the filename doesn't match expected format
         raise ValueError(f"Expected filename like 23012025-MAT.md but got {filename}")
 
-
 def _prepare_document_metadata(file_path: str) -> tuple:
     """
     Extract metadata from the file.
@@ -233,10 +273,9 @@ def _prepare_document_metadata(file_path: str) -> tuple:
     
     return content, title, url
 
-
 def _setup_database_document(title: str, url: str, file_path: str) -> dict:
     """
-    Configure document in database.
+    Configure document in database using UPSERT for better performance.
     
     Args:
         title (str): Document title
@@ -245,17 +284,44 @@ def _setup_database_document(title: str, url: str, file_path: str) -> dict:
         
     Returns:
         dict: Document record
+        
+    Raises:
+        ValueError: If any required parameter is None or empty
+        Exception: If database operation fails
     """
-    # Delete any existing document with the same URL to avoid duplicates
-    db.t.documents.delete_where("url = ?", [url])
-    doc = db.t.documents.insert(
-        title=title,
-        url=url,
-        file_path=file_path,
-        created_at=datetime.now()
-    )
-    return doc
-
+    # Validate input parameters
+    if not all([title, url, file_path]):
+        raise ValueError("All parameters (title, url, file_path) must be non-empty")
+    
+    try:
+        result = db.execute("""
+            INSERT INTO documents (title, url, file_path, created_at) 
+            VALUES (?, ?, ?, ?) 
+            ON CONFLICT (url) DO UPDATE SET 
+                title = EXCLUDED.title,
+                file_path = EXCLUDED.file_path,
+                created_at = EXCLUDED.created_at
+            RETURNING id, title, url, file_path, created_at
+        """, [title, url, file_path, datetime.now()])
+        
+        doc_row = result.fetchone()
+        if not doc_row:
+            raise Exception("Failed to insert/update document record")
+        
+        doc = {
+            "id": doc_row[0],
+            "title": doc_row[1], 
+            "url": doc_row[2],
+            "file_path": doc_row[3],
+            "created_at": doc_row[4]
+        }
+        
+        logger.info(f"Document configured successfully: {title} (ID: {doc['id']})")
+        return doc
+        
+    except Exception as e:
+        logger.error(f"Failed to configure document '{title}': {str(e)}")
+        raise
 
 def _prepare_page_chunks(content: str) -> list:
     """
@@ -274,7 +340,6 @@ def _prepare_page_chunks(content: str) -> list:
         logger.debug("No page markers found. Processing as a single-page document.")
     return page_chunks
 
-
 def _initialize_chunk_processing(file_path: str, verbose: bool) -> tuple:
     """
     Initialize variables for chunk processing.
@@ -286,7 +351,7 @@ def _initialize_chunk_processing(file_path: str, verbose: bool) -> tuple:
     Returns:
         tuple: (open_headings_dict, chunks_file, chunks_file_path)
     """
-    open_headings_dict = {}  # Dictionary of (level -> text) that are "open"
+    open_headings_dict = {}
     chunks_file = None
     chunks_file_path = None
     
@@ -296,34 +361,36 @@ def _initialize_chunk_processing(file_path: str, verbose: bool) -> tuple:
     
     return open_headings_dict, chunks_file, chunks_file_path
 
-
-def _process_first_chunk_headers(chunk_text: str, open_headings_dict: dict) -> dict:
+def _get_chunk_image_descriptions(document_name: str, page_number: int) -> str:
     """
-    Pre-read the first chunk to extract initial headers.
+    Get image descriptions for a specific document and page.
     
     Args:
-        chunk_text (str): Text of the first chunk
-        open_headings_dict (dict): Dictionary of open headings
+        document_name (str): Name of the document
+        page_number (int): Page number
         
     Returns:
-        dict: Updated open_headings_dict
+        str: Formatted image descriptions or empty string if none found
     """
-    lines = chunk_text.splitlines()
-    for line in lines:
-        lvl, txt = get_heading_level(line)
-        if lvl is not None:
-            # Update headings dictionary directly
-            open_headings_dict = update_open_headings_dict(open_headings_dict, line)
-            # If the first heading is H1, we stop the pre-reading.
-            if lvl == 1:
-                break
-        else:
-            # Stop if the first line that is not a heading is found.
-            break
-    return open_headings_dict
+    try:
+        result = db.execute(
+            "SELECT description FROM image_descriptions WHERE document_name = ? AND page_number = ?",
+            [document_name, page_number]
+        )
+        descriptions = result.fetchall()
+        
+        if descriptions:
+            logger.info(f"Image found on page {page_number} of document {document_name}")
+            formatted_descriptions = []
+            for i, desc_row in enumerate(descriptions, 1):
+                formatted_descriptions.append(f"Imagen {i}: {desc_row[0]}")
+            return f"\n\nImágenes en esta página: {'. '.join(formatted_descriptions)}."
+        return ""
+    except Exception as e:
+        logger.warning(f"Error querying image descriptions for {document_name}, page {page_number}: {str(e)}")
+        return ""
 
-
-def _generate_chunk_embedding(header: str, chunk_text: str, file_path: str, chunk_counter: int) -> bytes:
+def _generate_chunk_embedding(header: str, chunk_text: str, file_path: str, chunk_counter: int, description_images: str = ""):
     """
     Generate embedding for a chunk.
     
@@ -332,11 +399,12 @@ def _generate_chunk_embedding(header: str, chunk_text: str, file_path: str, chun
         chunk_text (str): Chunk text
         file_path (str): Path to the file (for error logging)
         chunk_counter (int): Chunk counter (for error logging)
+        description_images (str): Image descriptions for this chunk (optional)
         
     Returns:
-        bytes: Embedding vector
+        numpy.ndarray: Embedding vector
     """
-    text_for_embedding = f"{header}\n\n{chunk_text}"
+    text_for_embedding = f"{header}\n\n{chunk_text}{description_images}"
     
     try:
         embedding = model.encode(f"search_document: {text_for_embedding}")
@@ -345,8 +413,7 @@ def _generate_chunk_embedding(header: str, chunk_text: str, file_path: str, chun
         logger.error(f"Error generating embedding for chunk #{chunk_counter} of {file_path}: {str(e)}")
         raise
 
-
-def _write_debug_chunk(chunks_file, chunk_counter: int, header: str, chunk_text: str):
+def _write_debug_chunk(chunks_file, chunk_counter: int, header: str, chunk_text: str, description_images: str = ""):
     """
     Write chunk details to debug file.
     
@@ -355,15 +422,22 @@ def _write_debug_chunk(chunks_file, chunk_counter: int, header: str, chunk_text:
         chunk_counter (int): Chunk counter
         header (str): Chunk header
         chunk_text (str): Chunk text
+        description_images (str): Image descriptions associated with this chunk
     """
     if chunks_file:
         chunks_file.write(f"--- CHUNK #{chunk_counter} ---\n")
         chunks_file.write(f"Header:\n{header}\n\n")
         chunks_file.write(f"Text:\n{chunk_text}\n")
+        
+        # Add image descriptions if available
+        if description_images:
+            chunks_file.write(f"\nImage Descriptions:{description_images}\n")
+        else:
+            chunks_file.write("\nImage Descriptions: No images found for this chunk\n")
+            
         chunks_file.write("\n" + "-"*50 + "\n\n")
 
-
-def _save_chunk_to_database(doc_id: int, chunk_text: str, header: str, embedding: bytes):
+def _save_chunk_to_database(doc_id: int, chunk_text: str, header: str, embedding):
     """
     Save chunk in database.
     
@@ -371,16 +445,15 @@ def _save_chunk_to_database(doc_id: int, chunk_text: str, header: str, embedding
         doc_id (int): Document ID
         chunk_text (str): Chunk text
         header (str): Chunk header
-        embedding (bytes): Chunk embedding
+        embedding: Chunk embedding (numpy array)
     """
-    db.t.chunks.insert(
-        document_id=doc_id,
-        text=chunk_text,
-        header=header,
-        embedding=embedding,
-        created_at=datetime.now(),
-    )
-
+    # Convert numpy array to list for DuckDB FLOAT[] type
+    embedding_list = embedding.tolist()
+    
+    db.execute("""
+        INSERT INTO chunks (document_id, text, header, embedding, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, [doc_id, chunk_text, header, embedding_list, datetime.now()])
 
 def _update_headers_state(chunk_text: str, open_headings_dict: dict) -> dict:
     """
@@ -397,7 +470,6 @@ def _update_headers_state(chunk_text: str, open_headings_dict: dict) -> dict:
     for line in lines:
         open_headings_dict = update_open_headings_dict(open_headings_dict, line)
     return open_headings_dict
-
 
 def _process_single_chunk(chunk: dict, chunk_counter: int, title: str, open_headings_dict: dict, doc_id: int, chunks_file, verbose: bool, file_path: str) -> dict:
     """
@@ -419,19 +491,19 @@ def _process_single_chunk(chunk: dict, chunk_counter: int, title: str, open_head
     chunk_text = chunk["text"]
     page_number = chunk["page"]
 
-    # For the first chunk, pre-read the lines until the first heading is obtained.
-    if chunk_counter == 1:
-        open_headings_dict = _process_first_chunk_headers(chunk_text, open_headings_dict)
-
     # Build the header using the "open" headings at the beginning of the chunk.
     header = build_header_dict(title, page_number, open_headings_dict)
 
-    # Generate embedding
-    embedding = _generate_chunk_embedding(header, chunk_text, file_path, chunk_counter)
+    # Get image descriptions for this chunk
+    # Convert page_number to int for proper comparison with database
+    page_num_int = int(page_number) - 1
+    description_images = _get_chunk_image_descriptions(title, page_num_int)
 
-    # Write debug info if verbose
-    if verbose:
-        _write_debug_chunk(chunks_file, chunk_counter, header, chunk_text)
+    # Generate embedding
+    embedding = _generate_chunk_embedding(header, chunk_text, file_path, chunk_counter, description_images)
+
+
+    _write_debug_chunk(chunks_file, chunk_counter, header, chunk_text, description_images)
 
     # Save to database
     _save_chunk_to_database(doc_id, chunk_text, header, embedding)
@@ -440,7 +512,6 @@ def _process_single_chunk(chunk: dict, chunk_counter: int, title: str, open_head
     open_headings_dict = _update_headers_state(chunk_text, open_headings_dict)
     
     return open_headings_dict
-
 
 def process_file(file_path, verbose: bool = False):
     """
@@ -495,6 +566,34 @@ def process_file(file_path, verbose: bool = False):
         logger.error(f"Error processing file {file_path}: {str(e)}")
         raise
 
+def _create_hnsw_index_if_needed():
+    """
+    Creates an HNSW index on the chunks table embedding column if chunks exist.
+    This optimizes vector similarity search performance.
+    """
+    try:
+        # Check if there are any chunks in the database
+        result = db.execute("SELECT COUNT(*) FROM chunks").fetchone()
+        chunk_count = result[0] if result else 0
+        
+        if chunk_count > 0:
+            logger.info(f"Creating HNSW index for {chunk_count} chunks...")
+            # Create HNSW index on embedding column for efficient similarity search
+            
+            db.execute("SET hnsw_enable_experimental_persistence = true;")
+            
+            db.execute("""
+                CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw_idx 
+                ON chunks USING HNSW (embedding)
+            """)
+            logger.info("HNSW index created successfully")
+        else:
+            logger.info("No chunks found in database, skipping HNSW index creation")
+            
+    except Exception as e:
+        logger.warning(f"Failed to create HNSW index: {str(e)}")
+        logger.warning("Vector similarity search will use brute-force method")
+
 
 def process_directory(directory_path, verbose: bool = False):
     """
@@ -523,6 +622,7 @@ def process_directory(directory_path, verbose: bool = False):
                 process_directory(entry_path, verbose=verbose)
                 
         logger.info(f"Processing completed for directory: {directory_path}")
+        
     except Exception as e:
         logger.error(f"Error processing directory {directory_path}: {str(e)}")
         raise
@@ -548,6 +648,11 @@ def main(root_dir: str, verbose: bool = False):
     
     try:
         process_directory(root_dir, verbose=verbose)
+        
+        # Create HNSW index for optimized vector similarity search
+        logger.info("Creating HNSW index for vector similarity search optimization...")
+        _create_hnsw_index_if_needed()
+        
         elapsed_time = datetime.now() - start_time
         logger.info(f"Processing completed in {elapsed_time}")
     except Exception as e:
