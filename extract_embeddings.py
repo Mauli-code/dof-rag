@@ -53,6 +53,30 @@ logger = logging.getLogger("dof_embeddings")
 # Model configuration
 model = SentenceTransformer("nomic-ai/modernbert-embed-base", trust_remote_code=True)
 
+def get_embedding_dimension() -> int:
+    """
+    Get the embedding dimension from the loaded SentenceTransformer model.
+    
+    This function dynamically retrieves the embedding dimension from the model,
+    eliminating the need for hardcoded values that would require manual updates
+    when changing models.
+    
+    Returns:
+        int: The embedding dimension of the current model
+        
+    Raises:
+        Exception: If unable to get dimension from model
+    """
+    try:
+        embedding_dim = model.get_sentence_embedding_dimension()
+        logger.info(f"Retrieved embedding dimension: {embedding_dim} from model: {model._modules['0'].auto_model.name_or_path}")
+        return embedding_dim
+    except Exception as e:
+        logger.error(f"Error getting embedding dimension from model: {e}")
+        # Fallback to a reasonable default, but log the issue
+        logger.warning("Using fallback dimension of 768. Consider checking model configuration.")
+        return 768
+
 # %%
 # Database paths configuration
 DB_FILE = "dof_db/db.duckdb"
@@ -68,6 +92,9 @@ db = duckdb.connect(DB_FILE)
 # Install and load VSS extension for vector similarity search
 db.execute("INSTALL vss;")
 db.execute("LOAD vss;")
+
+# Get the embedding dimension dynamically from the model
+embedding_dim = get_embedding_dimension()
 
 # Create sequences for auto-incrementing primary keys
 db.execute("CREATE SEQUENCE IF NOT EXISTS documents_id_seq START 1")
@@ -86,13 +113,13 @@ db.execute("""
 """)
 
 # Chunks table: stores document chunks with embeddings
-db.execute("""
+db.execute(f"""
     CREATE TABLE IF NOT EXISTS chunks (
         id INTEGER PRIMARY KEY DEFAULT nextval('chunks_id_seq'),
         document_id INTEGER,
         text VARCHAR,
         header VARCHAR,
-        embedding FLOAT[768],
+        embedding FLOAT[{embedding_dim}],
         created_at TIMESTAMP,
         FOREIGN KEY (document_id) REFERENCES documents(id)
     )
