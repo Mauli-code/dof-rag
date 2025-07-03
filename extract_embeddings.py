@@ -95,10 +95,6 @@ if db_dir:
 # Database initialization and schema setup
 db = duckdb.connect(DB_FILE)
 
-# Install and load VSS extension for vector similarity search
-db.execute("INSTALL vss;")
-db.execute("LOAD vss;")
-
 # Get the embedding dimension dynamically from the model
 embedding_dim = get_embedding_dimension()
 
@@ -308,48 +304,63 @@ def _prepare_document_metadata(file_path: str) -> tuple:
 
 def _setup_database_document(title: str, url: str, file_path: str) -> dict:
     """
-    Configure document in database using UPSERT for better performance.
+    Configure document in database, cleaning up existing chunks to avoid foreign key violations.
     
     Args:
         title (str): Document title
-        url (str): Document URL
+        url (str): Document URL  
         file_path (str): Path to the document file
         
     Returns:
-        dict: Document record
+        dict: Document record with explicit type conversions
         
     Raises:
         ValueError: If any required parameter is None or empty
         Exception: If database operation fails
     """
-    # Validate input parameters
     if not all([title, url, file_path]):
         raise ValueError("All parameters (title, url, file_path) must be non-empty")
     
     try:
-        result = db.execute("""
-            INSERT INTO documents (title, url, file_path, created_at) 
-            VALUES (?, ?, ?, ?) 
-            ON CONFLICT (url) DO UPDATE SET 
-                title = EXCLUDED.title,
-                file_path = EXCLUDED.file_path,
-                created_at = EXCLUDED.created_at
-            RETURNING id, title, url, file_path, created_at
-        """, [title, url, file_path, datetime.now()])
+        existing_doc_df = db.execute("SELECT id FROM documents WHERE url = ?", [url]).df()
         
-        doc_row = result.fetchone()
-        if not doc_row:
+        if not existing_doc_df.empty:
+            doc_id = int(existing_doc_df.iloc[0]['id'])
+            db.execute("DELETE FROM chunks WHERE document_id = ?", [doc_id])
+            logger.info(f"Cleaned up existing chunks for document: {title}")
+            
+            db.execute("""
+                UPDATE documents 
+                SET title = ?, file_path = ?, created_at = ?
+                WHERE url = ?
+            """, [title, file_path, datetime.now(), url])
+            
+            result_df = db.execute(
+                "SELECT id, title, url, file_path, created_at FROM documents WHERE url = ?", 
+                [url]
+            ).df()
+            action = "updated"
+        else:
+            result_df = db.execute("""
+                INSERT INTO documents (title, url, file_path, created_at) 
+                VALUES (?, ?, ?, ?)
+                RETURNING id, title, url, file_path, created_at
+            """, [title, url, file_path, datetime.now()]).df()
+            action = "created"
+        
+        if result_df.empty:
             raise Exception("Failed to insert/update document record")
         
+        doc_row = result_df.iloc[0]
         doc = {
-            "id": doc_row[0],
-            "title": doc_row[1], 
-            "url": doc_row[2],
-            "file_path": doc_row[3],
-            "created_at": doc_row[4]
+            "id": int(doc_row['id']),  
+            "title": str(doc_row['title']), 
+            "url": str(doc_row['url']),
+            "file_path": str(doc_row['file_path']),
+            "created_at": doc_row['created_at']
         }
         
-        logger.info(f"Document configured successfully: {title} (ID: {doc['id']})")
+        logger.info(f"Document {action} successfully: {title} (ID: {doc['id']})")
         return doc
         
     except Exception as e:
@@ -410,13 +421,14 @@ def _get_chunk_image_descriptions(document_name: str, page_number: int) -> str:
             "SELECT description FROM image_descriptions WHERE document_name = ? AND page_number = ?",
             [document_name, page_number]
         )
-        descriptions = result.fetchall()
+        # Mejora: Usar DataFrame para acceso por nombre de columna (recomendación @jackbravo)
+        descriptions_df = result.df()
         
-        if descriptions:
+        if not descriptions_df.empty:
             logger.info(f"Image found on page {page_number} of document {document_name}")
             formatted_descriptions = []
-            for i, desc_row in enumerate(descriptions, 1):
-                formatted_descriptions.append(f"Imagen {i}: {desc_row[0]}")
+            for i, description in enumerate(descriptions_df['description'], 1):  # Acceso por nombre
+                formatted_descriptions.append(f"Imagen {i}: {description}")
             return f"\n\nImágenes en esta página: {'. '.join(formatted_descriptions)}."
         return ""
     except Exception as e:
@@ -599,35 +611,6 @@ def process_file(file_path, verbose: bool = False):
         logger.error(f"Error processing file {file_path}: {str(e)}")
         raise
 
-def _create_hnsw_index_if_needed():
-    """
-    Creates an HNSW index on the chunks table embedding column if chunks exist.
-    This optimizes vector similarity search performance.
-    """
-    try:
-        # Check if there are any chunks in the database
-        result = db.execute("SELECT COUNT(*) FROM chunks").fetchone()
-        chunk_count = result[0] if result else 0
-        
-        if chunk_count > 0:
-            logger.info(f"Creating HNSW index for {chunk_count} chunks...")
-            # Create HNSW index on embedding column for efficient similarity search
-            
-            db.execute("SET hnsw_enable_experimental_persistence = true;")
-            
-            db.execute("""
-                CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw_idx 
-                ON chunks USING HNSW (embedding)
-            """)
-            logger.info("HNSW index created successfully")
-        else:
-            logger.info("No chunks found in database, skipping HNSW index creation")
-            
-    except Exception as e:
-        logger.warning(f"Failed to create HNSW index: {str(e)}")
-        logger.warning("Vector similarity search will use brute-force method")
-
-
 def process_directory(directory_path, verbose: bool = False):
     """
     Recursively process all files in a directory and its subdirectories.
@@ -681,10 +664,6 @@ def main(root_dir: str, verbose: bool = False):
     
     try:
         process_directory(root_dir, verbose=verbose)
-        
-        # Create HNSW index for optimized vector similarity search
-        logger.info("Creating HNSW index for vector similarity search optimization...")
-        _create_hnsw_index_if_needed()
         
         elapsed_time = datetime.now() - start_time
         logger.info(f"Processing completed in {elapsed_time}")
