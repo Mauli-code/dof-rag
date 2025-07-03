@@ -39,6 +39,7 @@ from typing import Union, Tuple, Dict
 
 import typer
 import duckdb
+import pandas as pd
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
@@ -241,7 +242,7 @@ def split_text_by_page_break(text: str):
     # Last fragment after the last page mark
     remaining = text[last_index:].strip()
     if remaining:
-        final_page = last_page if last_page else "1"
+        final_page = str(int(last_page) + 1) if last_page else "1"
         chunks.append({"text": remaining, "page": final_page})
 
     logger.debug(f"Document split into {len(chunks)} chunks based on page markers")
