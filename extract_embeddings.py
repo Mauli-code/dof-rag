@@ -33,13 +33,14 @@ python extract_embeddings.py /path/to/markdown/files [--verbose]
 
 import os
 import re
+import torch
 import logging
 from datetime import datetime
 from typing import Union, Tuple, Dict
 
 import typer
 import duckdb
-import pandas as pd
+import polars as pl
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
@@ -57,7 +58,13 @@ logger = logging.getLogger("dof_embeddings")
 # %%
 
 # Model configuration
-model = SentenceTransformer("nomic-ai/modernbert-embed-base", trust_remote_code=True)
+model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B", trust_remote_code=True, device="cpu")
+
+# Set model to evaluation mode to save memory
+model.eval()
+
+# Disable gradient computation to save memory
+torch.set_grad_enabled(False)
 
 def get_embedding_dimension() -> int:
     """
@@ -80,8 +87,8 @@ def get_embedding_dimension() -> int:
     except Exception as e:
         logger.error(f"Error getting embedding dimension from model: {e}")
         # Fallback to a reasonable default, but log the issue
-        logger.warning("Using fallback dimension of 768. Consider checking model configuration.")
-        return 768
+        logger.warning("Using fallback dimension of 1024. Consider checking model configuration.")
+        return 1024
 
 # %%
 # Database paths configuration
@@ -91,7 +98,7 @@ DB_FILE = "dof_db/db.duckdb"
 db_dir = os.path.dirname(DB_FILE)
 if db_dir:
     os.makedirs(db_dir, exist_ok=True)
-    logger.info(f"Asegurando que el directorio de la base de datos exista en: {db_dir}")
+    logger.info(f"Ensuring database directory exists at: {db_dir}")
 
 # Database initialization and schema setup
 db = duckdb.connect(DB_FILE)
@@ -122,6 +129,7 @@ db.execute(f"""
         document_id INTEGER,
         text VARCHAR,
         header VARCHAR,
+        page_number INTEGER,  -- Page number of the chunk in the document
         embedding FLOAT[{embedding_dim}],
         created_at TIMESTAMP,
         FOREIGN KEY (document_id) REFERENCES documents(id)
@@ -220,6 +228,10 @@ def build_header_dict(doc_title: str, page: str, open_headings: Dict[int, str]) 
         header_lines.append(f"{'#' * level} {text}")
     
     return "\n".join(header_lines)
+
+# --- Function to clean <br> tags ---
+def clean_br(text: str) -> str:
+    return text.replace('<br>', '')
 
 def split_text_by_page_break(text: str):
     """
@@ -323,10 +335,10 @@ def _setup_database_document(title: str, url: str, file_path: str) -> dict:
         raise ValueError("All parameters (title, url, file_path) must be non-empty")
     
     try:
-        existing_doc_df = db.execute("SELECT id FROM documents WHERE url = ?", [url]).df()
+        existing_doc_df = db.execute("SELECT id FROM documents WHERE url = ?", [url]).pl()
         
-        if not existing_doc_df.empty:
-            doc_id = int(existing_doc_df.iloc[0]['id'])
+        if not existing_doc_df.is_empty():
+            doc_id = int(existing_doc_df.row(0, named=True)['id'])
             db.execute("DELETE FROM chunks WHERE document_id = ?", [doc_id])
             logger.info(f"Cleaned up existing chunks for document: {title}")
             
@@ -339,20 +351,20 @@ def _setup_database_document(title: str, url: str, file_path: str) -> dict:
             result_df = db.execute(
                 "SELECT id, title, url, file_path, created_at FROM documents WHERE url = ?", 
                 [url]
-            ).df()
+            ).pl()
             action = "updated"
         else:
             result_df = db.execute("""
                 INSERT INTO documents (title, url, file_path, created_at) 
                 VALUES (?, ?, ?, ?)
                 RETURNING id, title, url, file_path, created_at
-            """, [title, url, file_path, datetime.now()]).df()
+            """, [title, url, file_path, datetime.now()]).pl()
             action = "created"
         
-        if result_df.empty:
+        if result_df.is_empty():
             raise Exception("Failed to insert/update document record")
         
-        doc_row = result_df.iloc[0]
+        doc_row = result_df.row(0, named=True)
         doc = {
             "id": int(doc_row['id']),  
             "title": str(doc_row['title']), 
@@ -422,13 +434,13 @@ def _get_chunk_image_descriptions(document_name: str, page_number: int) -> str:
             "SELECT description FROM image_descriptions WHERE document_name = ? AND page_number = ?",
             [document_name, page_number]
         )
-        # Mejora: Usar DataFrame para acceso por nombre de columna (recomendación @jackbravo)
-        descriptions_df = result.df()
+        # Polars DataFrame for column name access 
+        descriptions_df = result.pl()
         
-        if not descriptions_df.empty:
+        if not descriptions_df.is_empty():
             logger.info(f"Image found on page {page_number} of document {document_name}")
             formatted_descriptions = []
-            for i, description in enumerate(descriptions_df['description'], 1):  # Acceso por nombre
+            for i, description in enumerate(descriptions_df['description'].to_list(), 1):
                 formatted_descriptions.append(f"Imagen {i}: {description}")
             return f"\n\nImágenes en esta página: {'. '.join(formatted_descriptions)}."
         return ""
@@ -453,7 +465,12 @@ def _generate_chunk_embedding(header: str, chunk_text: str, file_path: str, chun
     text_for_embedding = f"{header}\n\n{chunk_text}{description_images}"
     
     try:
-        embedding = model.encode(f"search_document: {text_for_embedding}")
+        # Best practice: wrap inference calls in torch.no_grad()
+        with torch.no_grad():
+            embedding = model.encode(f"search_document: {text_for_embedding}", show_progress_bar=False)
+        
+        del text_for_embedding
+
         return embedding
     except Exception as e:
         logger.error(f"Error generating embedding for chunk #{chunk_counter} of {file_path}: {str(e)}")
@@ -483,7 +500,7 @@ def _write_debug_chunk(chunks_file, chunk_counter: int, header: str, chunk_text:
             
         chunks_file.write("\n" + "-"*50 + "\n\n")
 
-def _save_chunk_to_database(doc_id: int, chunk_text: str, header: str, embedding):
+def _save_chunk_to_database(doc_id: int, chunk_text: str, header: str, page_number: int, embedding):
     """
     Save chunk in database.
     
@@ -491,15 +508,16 @@ def _save_chunk_to_database(doc_id: int, chunk_text: str, header: str, embedding
         doc_id (int): Document ID
         chunk_text (str): Chunk text
         header (str): Chunk header
+        page_number (int): Page number
         embedding: Chunk embedding (numpy array)
     """
     # Convert numpy array to list for DuckDB FLOAT[] type
     embedding_list = embedding.tolist()
     
     db.execute("""
-        INSERT INTO chunks (document_id, text, header, embedding, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    """, [doc_id, chunk_text, header, embedding_list, datetime.now()])
+        INSERT INTO chunks (document_id, text, header, page_number, embedding, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, [doc_id, chunk_text, header, page_number, embedding_list, datetime.now()])
 
 def _update_headers_state(chunk_text: str, open_headings_dict: dict) -> dict:
     """
@@ -534,7 +552,7 @@ def _process_single_chunk(chunk: dict, chunk_counter: int, title: str, open_head
     Returns:
         dict: Updated open_headings_dict
     """
-    chunk_text = chunk["text"]
+    chunk_text = clean_br(chunk["text"])
     page_number = chunk["page"]
 
     # Build the header using the "open" headings at the beginning of the chunk.
@@ -548,11 +566,11 @@ def _process_single_chunk(chunk: dict, chunk_counter: int, title: str, open_head
     # Generate embedding
     embedding = _generate_chunk_embedding(header, chunk_text, file_path, chunk_counter, description_images)
 
-
-    _write_debug_chunk(chunks_file, chunk_counter, header, chunk_text, description_images)
+    if verbose:
+        _write_debug_chunk(chunks_file, chunk_counter, header, chunk_text, description_images)
 
     # Save to database
-    _save_chunk_to_database(doc_id, chunk_text, header, embedding)
+    _save_chunk_to_database(doc_id, chunk_text, header, page_number, embedding)
 
     # Update headers state
     open_headings_dict = _update_headers_state(chunk_text, open_headings_dict)
@@ -591,14 +609,21 @@ def process_file(file_path, verbose: bool = False):
         open_headings_dict, chunks_file, chunks_file_path = _initialize_chunk_processing(file_path, verbose)
         
         try:
-            # 5. Process each chunk
+            # 5. Process each chunk with progress bar
+            total_pages = len(page_chunks)
             chunk_counter = 0
-            for chunk in page_chunks:
-                chunk_counter += 1
-                open_headings_dict = _process_single_chunk(
-                    chunk, chunk_counter, title, open_headings_dict, 
-                    doc["id"], chunks_file, verbose, file_path
-                )
+            
+            with tqdm(total=total_pages, desc=f"Processing {title[:30]}...", unit="page") as pbar:
+                for chunk in page_chunks:
+                    chunk_counter += 1
+                    open_headings_dict = _process_single_chunk(
+                        chunk, chunk_counter, title, open_headings_dict, 
+                        doc["id"], chunks_file, verbose, file_path
+                    )
+                    
+                    # Update progress bar
+                    pbar.set_postfix({"page": f"{chunk['page']}"})
+                    pbar.update(1)
         finally:
             if chunks_file:
                 chunks_file.close()
@@ -627,15 +652,18 @@ def process_directory(directory_path, verbose: bool = False):
         logger.info(f"Found {len(md_files)} markdown files in {directory_path}")
         
         # Loop through all entries in the directory
-        for entry in tqdm(entries, desc=f"Processing {directory_path}"):
+        for entry in tqdm(md_files, desc=f"Processing {directory_path}"):
             # Create full path
             entry_path = os.path.join(directory_path, entry)
 
-            # If it's a file, process it
-            if os.path.isfile(entry_path) and entry_path.lower().endswith(".md"):
-                process_file(entry_path, verbose=verbose)
+            # Process the markdown file
+            process_file(entry_path, verbose=verbose)
+            
+        # Process subdirectories separately without progress bar
+        for entry in entries:
+            entry_path = os.path.join(directory_path, entry)
             # If it's a directory, recursively process it
-            elif os.path.isdir(entry_path):
+            if os.path.isdir(entry_path):
                 process_directory(entry_path, verbose=verbose)
                 
         logger.info(f"Processing completed for directory: {directory_path}")
