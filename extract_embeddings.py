@@ -58,7 +58,7 @@ logger = logging.getLogger("dof_embeddings")
 # %%
 
 # Model configuration
-model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B", trust_remote_code=True, device="cpu")
+model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B", trust_remote_code=True)
 
 # Set model to evaluation mode to save memory
 model.eval()
