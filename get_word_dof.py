@@ -5,21 +5,21 @@ Simplified version - Only downloads WORD files
 
 Usage examples:
 # For a specific date:
-python word.py 02/01/2023 --editions both --log-level INFO
+python get_word_dof.py 02/01/2023 --editions both --log-level INFO
 
 # For a date range:
-python word.py 01/01/2023 31/01/2023 --editions both --log-level INFO
+python get_word_dof.py 01/01/2023 31/01/2023 --editions both --log-level INFO
 
 # Specifying custom directory:
-python word.py 02/01/2023 --output-dir ./my_folder --editions both --log-level INFO
+python get_word_dof.py 02/01/2023 --output-dir ./my_folder --editions both --log-level INFO
 
 # Using custom delay between downloads (default is 1.0 seconds):
-python word.py 02/01/2023 --sleep-delay 0.5  # Faster downloads (0.5 seconds)
-python word.py 02/01/2023 --sleep-delay 2.0  # Slower downloads (2 seconds)
-python word.py 02/01/2023 --sleep-delay 0.1  # Very fast (0.1 seconds - use with caution)
+python get_word_dof.py 02/01/2023 --sleep-delay 0.5  # Faster downloads (0.5 seconds)
+python get_word_dof.py 02/01/2023 --sleep-delay 2.0  # Slower downloads (2 seconds)
+python get_word_dof.py 02/01/2023 --sleep-delay 0.1  # Very fast (0.1 seconds - use with caution)
 
 # Complete example with all options:
-python word.py 01/01/2023 31/01/2023 --output-dir ./dof_files --editions both --log-level DEBUG --sleep-delay 1.5
+python get_word_dof.py 01/01/2023 31/01/2023 --output-dir ./dof_files --editions both --log-level DEBUG --sleep-delay 1.5
 
 
 """
@@ -43,6 +43,9 @@ from requests.adapters import HTTPAdapter
 # Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# Constants
+MIN_FILE_SIZE = 1024  # Minimum file size in bytes for validation
+
 
 class TLSAdapter(HTTPAdapter):
     """Custom adapter to force TLS 1.2 or 1.3"""
@@ -59,15 +62,18 @@ class TLSAdapter(HTTPAdapter):
 def setup_session() -> requests.Session:
     """
     Configures a requests session with custom TLS adapter
+    
+    This function disables SSL certificate verification for compatibility
+    with the DOF website.
     """
     ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
+    ssl_context.check_hostname = False  # Disables hostname verification
+    ssl_context.verify_mode = ssl.CERT_NONE  # Disables certificate verification
     ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
     
     session = requests.Session()
     session.mount('https://', TLSAdapter(ssl_context=ssl_context))
-    session.verify = False
+    session.verify = False  # Disables requests SSL verification - security risk
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     })
@@ -130,7 +136,7 @@ def download_word_file(session: requests.Session, url: str, output_path: Path) -
             f.write(response.content)
         
         # Basic validation: check if file exists and has minimum size
-        if output_path.exists() and output_path.stat().st_size >= 1024:
+        if output_path.exists() and output_path.stat().st_size >= MIN_FILE_SIZE:
             logging.info(f"Downloaded successfully: {output_path}")
             return True
         else:
@@ -196,8 +202,8 @@ def process_dof_page(session: requests.Session, date_str: str, edition: str, out
             output_path = date_dir / filename
             
             # Skip if file already exists and has minimum size
-            if output_path.exists() and output_path.stat().st_size >= 1024:
-                logging.info(f"WARNING: File already exists: {output_path}")
+            if output_path.exists() and output_path.stat().st_size >= MIN_FILE_SIZE:
+                logging.warning(f"File already exists: {output_path}")
                 continue
             
             # Download file
@@ -228,21 +234,21 @@ def main(
     
     Usage examples:
     # For a specific date (uses ./dof_word by default):
-    python word.py 02/01/2023 --editions both
+    python get_word_dof.py 02/01/2023 --editions both
     
     # For a date range:
-    python word.py 01/01/2023 31/01/2023 --editions both
+    python get_word_dof.py 01/01/2023 31/01/2023 --editions both
     
     # Specifying custom directory:
-    python word.py 02/01/2023 --output-dir ./my_folder --editions both
+    python get_word_dof.py 02/01/2023 --output-dir ./my_folder --editions both
     
     # Controlling download speed with sleep_delay:
-    python word.py 02/01/2023 --sleep-delay 0.5   # Fast downloads (0.5s between files)
-    python word.py 02/01/2023 --sleep-delay 2.0   # Slow downloads (2s between files)
-    python word.py 02/01/2023 --sleep-delay 0.1   # Very fast (0.1s - use carefully)
+    python get_word_dof.py 02/01/2023 --sleep-delay 0.5   # Fast downloads (0.5s between files)
+    python get_word_dof.py 02/01/2023 --sleep-delay 2.0   # Slow downloads (2s between files)
+    python get_word_dof.py 02/01/2023 --sleep-delay 0.1   # Very fast (0.1s - use carefully)
     
     # Complete example:
-    python word.py 01/01/2023 31/01/2023 --output-dir ./dof --editions both --sleep-delay 1.5
+    python get_word_dof.py 01/01/2023 31/01/2023 --output-dir ./dof --editions both --sleep-delay 1.5
     """
     
     # Configure logging
