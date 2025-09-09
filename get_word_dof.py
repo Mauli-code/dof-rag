@@ -3,25 +3,6 @@
 Script to download WORD files from the Official Gazette of the Federation (DOF)
 Simplified version - Only downloads WORD files
 
-Usage examples:
-# For a specific date:
-python get_word_dof.py 02/01/2023 --editions both --log-level INFO
-
-# For a date range:
-python get_word_dof.py 01/01/2023 31/01/2023 --editions both --log-level INFO
-
-# Specifying custom directory:
-python get_word_dof.py 02/01/2023 --output-dir ./my_folder --editions both --log-level INFO
-
-# Using custom delay between downloads (default is 1.0 seconds):
-python get_word_dof.py 02/01/2023 --sleep-delay 0.5  # Faster downloads (0.5 seconds)
-python get_word_dof.py 02/01/2023 --sleep-delay 2.0  # Slower downloads (2 seconds)
-python get_word_dof.py 02/01/2023 --sleep-delay 0.1  # Very fast (0.1 seconds - use with caution)
-
-# Complete example with all options:
-python get_word_dof.py 01/01/2023 31/01/2023 --output-dir ./dof_files --editions both --log-level DEBUG --sleep-delay 1.5
-
-
 """
 
 import re

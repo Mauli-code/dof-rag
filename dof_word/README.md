@@ -20,22 +20,39 @@ Este proyecto contiene una herramienta de línea de comandos que permite descarg
 - Python 3.7 o superior
 
 ### Dependencias
-```
-requests
-typer
-beautifulsoup4
-urllib3
-```
+
+Las dependencias están definidas en el archivo `pyproject.toml` del proyecto principal:
+- requests
+- typer
+- beautifulsoup4
+- urllib3
 
 ## Instalación
 
+Este proyecto utiliza `uv` para el manejo de dependencias. Para instalar las dependencias:
+
 ```bash
-pip install requests typer beautifulsoup4 urllib3
+# Instalar uv si no lo tienes
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Instalar dependencias del proyecto
+uv sync
+```
+
+O si prefieres ejecutar el script directamente con uv:
+
+```bash
+uv run python get_word_dof.py [FECHA] [OPCIONES]
 ```
 
 ## Uso
 
 ### Sintaxis básica
+```bash
+uv run python get_word_dof.py [FECHA] [FECHA_FIN] [OPCIONES]
+```
+
+O si ya tienes el entorno activado:
 ```bash
 python get_word_dof.py [FECHA] [FECHA_FIN] [OPCIONES]
 ```
@@ -57,34 +74,34 @@ python get_word_dof.py [FECHA] [FECHA_FIN] [OPCIONES]
 ### 1. Descargar una fecha específica
 ```bash
 # Descargar ambas ediciones del 2 de enero de 2023
-python get_word_dof.py 02/01/2023 --editions both --log-level INFO
+uv run python get_word_dof.py 02/01/2023 --editions both --log-level INFO
 ```
 
 ### 2. Descargar un rango de fechas
 ```bash
 # Descargar todo enero de 2023
-python get_word_dof.py 01/01/2023 31/01/2023 --editions both --log-level INFO
+uv run python get_word_dof.py 01/01/2023 31/01/2023 --editions both --log-level INFO
 ```
 
 ### 3. Descargar solo edición matutina
 ```bash
 # Solo edición matutina del 15 de febrero de 2023
-python get_word_dof.py 15/02/2023 --editions mat
+uv run python get_word_dof.py 15/02/2023 --editions mat
 ```
 
 ### 4. Especificar directorio personalizado
 ```bash
 # Guardar en directorio personalizado
-python get_word_dof.py 02/01/2023 --output-dir ./mi_carpeta --editions both
+uv run python get_word_dof.py 02/01/2023 --output-dir ./mi_carpeta --editions both
 ```
 
 ### 5. Ajustar velocidad de descarga
 ```bash
 # Descargar más lento (2 segundos entre archivos)
-python get_word_dof.py 02/01/2023 --sleep-delay 2.0
+uv run python get_word_dof.py 02/01/2023 --sleep-delay 2.0
 
 # Descargar más rápido (0.5 segundos entre archivos)
-python get_word_dof.py 02/01/2023 --sleep-delay 0.5
+uv run python get_word_dof.py 02/01/2023 --sleep-delay 0.5
 ```
 
 ## Estructura de archivos

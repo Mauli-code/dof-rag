@@ -16,6 +16,8 @@ dependencies = [
     "ruff>=0.9.9",
     "tokenizers>=0.21.0",
     "tqdm>=4.67.1",
+    "beautifulsoup4,
+    "urllib3,
 ]
 
 [tool.ruff]
