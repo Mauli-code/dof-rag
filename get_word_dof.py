@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.7"
+# dependencies = [
+#     "requests",
+#     "typer",
+#     "beautifulsoup4",
+#     "urllib3",
+# ]
+# ///
 """
 Script to download WORD files from the Official Gazette of the Federation (DOF)
 Simplified version - Only downloads WORD files

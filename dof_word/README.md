@@ -21,7 +21,7 @@ Este proyecto contiene una herramienta de línea de comandos que permite descarg
 
 ### Dependencias
 
-Las dependencias están definidas en el archivo `pyproject.toml` del proyecto principal:
+Este script tiene las dependencias definidas inline usando el formato de uv script:
 - requests
 - typer
 - beautifulsoup4
@@ -29,32 +29,24 @@ Las dependencias están definidas en el archivo `pyproject.toml` del proyecto pr
 
 ## Instalación
 
-Este proyecto utiliza `uv` para el manejo de dependencias. Para instalar las dependencias:
+Este script utiliza `uv` con dependencias inline
 
 ```bash
 # Instalar uv si no lo tienes
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Instalar dependencias del proyecto
-uv sync
 ```
 
-O si prefieres ejecutar el script directamente con uv:
+Luego puedes ejecutar el script directamente y uv manejará automáticamente las dependencias:
 
 ```bash
-uv run python get_word_dof.py [FECHA] [OPCIONES]
+uv run get_word_dof.py [FECHA] [OPCIONES]
 ```
 
 ## Uso
 
 ### Sintaxis básica
 ```bash
-uv run python get_word_dof.py [FECHA] [FECHA_FIN] [OPCIONES]
-```
-
-O si ya tienes el entorno activado:
-```bash
-python get_word_dof.py [FECHA] [FECHA_FIN] [OPCIONES]
+uv run get_word_dof.py [FECHA] [FECHA_FIN] [OPCIONES]
 ```
 
 ### Parámetros
@@ -74,34 +66,34 @@ python get_word_dof.py [FECHA] [FECHA_FIN] [OPCIONES]
 ### 1. Descargar una fecha específica
 ```bash
 # Descargar ambas ediciones del 2 de enero de 2023
-uv run python get_word_dof.py 02/01/2023 --editions both --log-level INFO
+uv run get_word_dof.py 02/01/2023 --editions both --log-level INFO
 ```
 
 ### 2. Descargar un rango de fechas
 ```bash
 # Descargar todo enero de 2023
-uv run python get_word_dof.py 01/01/2023 31/01/2023 --editions both --log-level INFO
+uv run get_word_dof.py 01/01/2023 31/01/2023 --editions both --log-level INFO
 ```
 
 ### 3. Descargar solo edición matutina
 ```bash
 # Solo edición matutina del 15 de febrero de 2023
-uv run python get_word_dof.py 15/02/2023 --editions mat
+uv run get_word_dof.py 15/02/2023 --editions mat
 ```
 
 ### 4. Especificar directorio personalizado
 ```bash
 # Guardar en directorio personalizado
-uv run python get_word_dof.py 02/01/2023 --output-dir ./mi_carpeta --editions both
+uv run get_word_dof.py 02/01/2023 --output-dir ./mi_carpeta --editions both
 ```
 
 ### 5. Ajustar velocidad de descarga
 ```bash
 # Descargar más lento (2 segundos entre archivos)
-uv run python get_word_dof.py 02/01/2023 --sleep-delay 2.0
+uv run get_word_dof.py 02/01/2023 --sleep-delay 2.0
 
 # Descargar más rápido (0.5 segundos entre archivos)
-uv run python get_word_dof.py 02/01/2023 --sleep-delay 0.5
+uv run get_word_dof.py 02/01/2023 --sleep-delay 0.5
 ```
 
 ## Estructura de archivos
