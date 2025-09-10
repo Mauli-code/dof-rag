@@ -56,39 +56,21 @@ logging.basicConfig(
 logger = logging.getLogger("dof_embeddings")
 
 # %%
-
 # Model configuration
-model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B", trust_remote_code=True)
+# Embedding dimension truncated to 1024 for optimal performance and storage efficiency
+embedding_dim = 1024
+
+model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B", trust_remote_code=True, truncate_dim=embedding_dim)
 
 # Set model to evaluation mode to save memory
+# Disables training-specific layers such as dropout and batch norm
+# Reference: https://stackoverflow.com/questions/55627780/evaluating-pytorch-models-with-torch-no-grad-vs-model-eval
 model.eval()
 
 # Disable gradient computation to save memory
+# Globally disables gradient computation and significantly reduces memory consumption
+# Reference: https://discuss.pytorch.org/t/does-model-eval-with-torch-set-grad-enabled-is-train-have-the-same-effect-for-grad-history/17183
 torch.set_grad_enabled(False)
-
-def get_embedding_dimension() -> int:
-    """
-    Get the embedding dimension from the loaded SentenceTransformer model.
-    
-    This function dynamically retrieves the embedding dimension from the model,
-    eliminating the need for hardcoded values that would require manual updates
-    when changing models.
-    
-    Returns:
-        int: The embedding dimension of the current model
-        
-    Raises:
-        Exception: If unable to get dimension from model
-    """
-    try:
-        embedding_dim = model.get_sentence_embedding_dimension()
-        logger.info(f"Retrieved embedding dimension: {embedding_dim} from model: {model._modules['0'].auto_model.name_or_path}")
-        return embedding_dim
-    except Exception as e:
-        logger.error(f"Error getting embedding dimension from model: {e}")
-        # Fallback to a reasonable default, but log the issue
-        logger.warning("Using fallback dimension of 1024. Consider checking model configuration.")
-        return 1024
 
 # %%
 # Database paths configuration
@@ -102,9 +84,6 @@ if db_dir:
 
 # Database initialization and schema setup
 db = duckdb.connect(DB_FILE)
-
-# Get the embedding dimension dynamically from the model
-embedding_dim = get_embedding_dimension()
 
 # Create sequences for auto-incrementing primary keys
 db.execute("CREATE SEQUENCE IF NOT EXISTS documents_id_seq START 1")
@@ -465,7 +444,9 @@ def _generate_chunk_embedding(header: str, chunk_text: str, file_path: str, chun
     text_for_embedding = f"{header}\n\n{chunk_text}{description_images}"
     
     try:
-        # Best practice: wrap inference calls in torch.no_grad()
+        # Context manager that disables gradient tracking and prevents creation of intermediate buffers
+        # Improves memory efficiency and faster execution during inference
+        # Reference: https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html
         with torch.no_grad():
             embedding = model.encode(f"search_document: {text_for_embedding}", show_progress_bar=False)
         
