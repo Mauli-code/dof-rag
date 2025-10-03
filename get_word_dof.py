@@ -368,21 +368,21 @@ def main(
     
     Usage examples:
     # For a specific date (uses ./dof_word by default):
-    python get_word_dof_new.py 02/01/2023 --editions both
+    python get_word_dof.py 02/01/2023 --editions both
     
     # For a date range:
-    python get_word_dof_new.py 01/01/2023 31/01/2023 --editions both
+    python get_word_dof.py 01/01/2023 31/01/2023 --editions both
     
     # Specifying custom directory:
-    python get_word_dof_new.py 02/01/2023 --output-dir ./my_folder --editions both
+    python get_word_dof.py 02/01/2023 --output-dir ./my_folder --editions both
     
     # Controlling download speed with sleep_delay:
-    python get_word_dof_new.py 02/01/2023 --sleep-delay 0.5   # Fast downloads (0.5s between files)
-    python get_word_dof_new.py 02/01/2023 --sleep-delay 2.0   # Slow downloads (2s between files)
-    python get_word_dof_new.py 02/01/2023 --sleep-delay 0.1   # Very fast (0.1s - use carefully)
+    python get_word_dof.py 02/01/2023 --sleep-delay 0.5   # Fast downloads (0.5s between files)
+    python get_word_dof.py 02/01/2023 --sleep-delay 2.0   # Slow downloads (2s between files)
+    python get_word_dof.py 02/01/2023 --sleep-delay 0.1   # Very fast (0.1s - use carefully)
     
     # Complete example:
-    python get_word_dof_new.py 01/01/2023 31/01/2023 --output-dir ./dof --editions both --sleep-delay 1.5
+    python get_word_dof.py 01/01/2023 31/01/2023 --output-dir ./dof --editions both --sleep-delay 1.5
     """
     
     log_levels = {
