@@ -195,14 +195,6 @@ def _download_file(session: requests.Session, url: str, output_path: Path, file_
 def download_word_file(session: requests.Session, url: str, output_path: Path) -> bool:
     """
     Downloads a WORD file from the specified URL
-    
-    Args:
-        session: Configured requests session
-        url: URL of the WORD file
-        output_path: Path where to save the file
-        
-    Returns:
-        True if download was successful, False otherwise
     """
     return _download_file(session, url, output_path, file_type="WORD file")
 
@@ -210,20 +202,19 @@ def download_word_file(session: requests.Session, url: str, output_path: Path) -
 def download_notice_file(session: requests.Session, note_id: str, output_path: Path) -> bool:
     """
     Downloads a notice file from SIDOF
-    
-    Args:
-        session: Configured requests session
-        note_id: Note ID from SIDOF
-        output_path: Path where to save the file
-        
-    Returns:
-        True if download was successful, False otherwise
     """
     url = f"https://sidof.segob.gob.mx/notas/getDoc/{note_id}"
     return _download_file(session, url, output_path, file_type="notice")
 
 
-def process_sidof_notices(session: requests.Session, day: str, month: str, year: str, edition: str, output_dir: Path, sleep_delay: float = 1.0) -> int:
+def _create_edition_dir(output_dir: Path, day: str, month: str, year: str, edition: str) -> Path:
+    """Creates and returns edition directory path"""
+    date_dir = output_dir / year / month / f"{day}{month}{year}" / edition
+    date_dir.mkdir(parents=True, exist_ok=True)
+    return date_dir
+
+
+def process_sidof_notices(session: requests.Session, day: str, month: str, year: str, edition: str, output_dir: Path, sleep_delay: float = 1.0, start_index: int = 0) -> int:
     """
     Processes SIDOF page to download AVISOS notices for specific edition
     
@@ -239,10 +230,7 @@ def process_sidof_notices(session: requests.Session, day: str, month: str, year:
     Returns:
         Number of notice files downloaded successfully
     """
-    sidof_date = f"{day}-{month}-{year}"
-    date_str = f"{day}/{month}/{year}"
-    
-    sidof_url = f"https://sidof.segob.gob.mx/welcome/{sidof_date}"
+    sidof_url = f"https://sidof.segob.gob.mx/welcome/{day}-{month}-{year}"
     
     try:
         logging.info(f"Processing SIDOF page: {sidof_url}")
@@ -252,7 +240,7 @@ def process_sidof_notices(session: requests.Session, day: str, month: str, year:
         notice_links = extract_notice_links(response.text)
         
         if not notice_links:
-            logging.info(f"No notices found for {date_str} in SIDOF")
+            logging.info(f"No notices found for {day}/{month}/{year} in SIDOF")
             return 0
         
         filtered_notices = [(nid, ed) for nid, ed in notice_links if ed == edition]
@@ -263,14 +251,12 @@ def process_sidof_notices(session: requests.Session, day: str, month: str, year:
             logging.info(f"No notices found for {edition} edition")
             return 0
         
-        base_date_dir = output_dir / year / month / f"{day}{month}{year}"
-        date_dir = base_date_dir / edition
-        date_dir.mkdir(parents=True, exist_ok=True)
+        date_dir = _create_edition_dir(output_dir, day, month, year, edition)
         
         downloaded_count = 0
         
-        for note_id, _ in filtered_notices:
-            filename = f"AVISO_{year}{month}{day}_{edition}_{note_id}.doc"
+        for index, (note_id, _) in enumerate(filtered_notices, start=start_index):
+            filename = f"{str(index+1).zfill(3)}_AVISO_{year}{month}{day}_{edition}_{note_id}.doc"
             output_path = date_dir / filename
             
             if output_path.exists() and output_path.stat().st_size >= MIN_FILE_SIZE:
@@ -303,8 +289,7 @@ def process_dof_page(session: requests.Session, date_str: str, edition: str, out
     Returns:
         Number of files downloaded successfully
     """
-    date_parts = date_str.split('/')
-    day, month, year = date_parts[0], date_parts[1], date_parts[2]
+    day, month, year = date_str.split('/')
     
     dof_url = f"https://www.dof.gob.mx/index.php?year={year}&month={month}&day={day}&edicion={edition}"
     
@@ -321,14 +306,12 @@ def process_dof_page(session: requests.Session, date_str: str, edition: str, out
         
         logging.info(f"Found {len(word_links)} WORD files")
         
-        base_date_dir = output_dir / year / month / f"{day}{month}{year}"
-        date_dir = base_date_dir / edition
-        date_dir.mkdir(parents=True, exist_ok=True)
+        date_dir = _create_edition_dir(output_dir, day, month, year, edition)
         
         downloaded_count = 0
         
-        for word_url, codnota in word_links:
-            filename = f"DOF_{year}{month}{day}_{edition}_{codnota}.doc"
+        for index, (word_url, codnota) in enumerate(word_links):
+            filename = f"{str(index+1).zfill(3)}_DOF_{year}{month}{day}_{edition}_{codnota}.doc"
             output_path = date_dir / filename
             
             if output_path.exists() and output_path.stat().st_size >= MIN_FILE_SIZE:
@@ -341,7 +324,7 @@ def process_dof_page(session: requests.Session, date_str: str, edition: str, out
             time.sleep(sleep_delay)
         
         logging.info(f"Now processing SIDOF notices for {date_str} - {edition}")
-        notices_downloaded = process_sidof_notices(session, day, month, year, edition, output_dir, sleep_delay)
+        notices_downloaded = process_sidof_notices(session, day, month, year, edition, output_dir, sleep_delay, start_index=len(word_links))
         downloaded_count += notices_downloaded
         
         return downloaded_count
