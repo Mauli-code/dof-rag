@@ -139,18 +139,15 @@ def extract_notice_links(html_content: str) -> List[tuple[str, str]]:
         if not parent_panel:
             continue
         
-        collapse_divs = parent_panel.find_all('div', class_=re.compile(r'panel-collapse'))
+        note_links = parent_panel.find_all('a', href=re.compile(r'/notas/\d+'))
         
-        for collapse_div in collapse_divs:
-            note_links = collapse_div.find_all('a', href=re.compile(r'/notas/\d+'))
-            
-            for link in note_links:
-                href = link.get('href')
-                if href:
-                    match_id = re.search(r'/notas/(\d+)', href)
-                    if match_id:
-                        note_id = match_id.group(1)
-                        notice_links.append((note_id, edition))
+        for link in note_links:
+            href = link.get('href')
+            if href:
+                match_id = re.search(r'/notas/(\d+)', href)
+                if match_id:
+                    note_id = match_id.group(1)
+                    notice_links.append((note_id, edition))
     
     return notice_links
 
