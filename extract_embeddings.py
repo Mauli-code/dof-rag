@@ -49,7 +49,6 @@ from tqdm import tqdm
 # DEVICE CONFIGURATION
 # =============================================================================
 
-# Advanced device detection and configuration
 IS_CUDA_AVAILABLE = torch.cuda.is_available()
 IS_MPS_AVAILABLE = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
 IS_CPU_ONLY = not IS_CUDA_AVAILABLE and not IS_MPS_AVAILABLE
@@ -75,10 +74,8 @@ logging.basicConfig(
 logger = logging.getLogger("dof_embeddings")
 
 # %%
-# Advanced model configuration with device optimization
 logger.info(f"Loading model: {MODEL_NAME}")
 
-# Enhanced model initialization with device mapping
 model = SentenceTransformer(
     MODEL_NAME, 
     truncate_dim=EMBEDDING_DIM,
