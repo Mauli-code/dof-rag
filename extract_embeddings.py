@@ -14,6 +14,7 @@ FEATURES:
 - Image descriptions integration for enhanced semantic context
 - Efficient embedding storage using DuckDB with FLOAT[] arrays
 - Debug output files for manual inspection
+- Optimized model sequence length (1024 tokens vs default 32k) for better performance
 
 IMAGE INTEGRATION:
 The script integrates image descriptions into the embedding process:
@@ -61,7 +62,7 @@ device = torch.device(
 # Model configuration constants
 MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
 EMBEDDING_DIM = 1024
-MODEL_MAX_SEQ_LENGTH = 1024
+MODEL_MAX_SEQ_LENGTH = 1024  # Optimized from 32k default for better performance and memory usage
 
 logging.basicConfig(
     level=logging.INFO,  
