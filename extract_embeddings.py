@@ -44,6 +44,24 @@ import polars as pl
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
+# =============================================================================
+# DEVICE CONFIGURATION
+# =============================================================================
+
+# Advanced device detection and configuration
+IS_CUDA_AVAILABLE = torch.cuda.is_available()
+IS_MPS_AVAILABLE = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+IS_CPU_ONLY = not IS_CUDA_AVAILABLE and not IS_MPS_AVAILABLE
+
+device = torch.device(
+    "cuda" if IS_CUDA_AVAILABLE else
+    ("mps" if IS_MPS_AVAILABLE else "cpu")
+)
+
+# Model configuration constants
+MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
+EMBEDDING_DIM = 1024
+MODEL_MAX_SEQ_LENGTH = 1024
 
 logging.basicConfig(
     level=logging.INFO,  
@@ -56,12 +74,26 @@ logging.basicConfig(
 logger = logging.getLogger("dof_embeddings")
 
 # %%
-# Model configuration
-# Embedding dimension truncated to 1024 for optimal performance and storage efficiency
-embedding_dim = 1024
+# Advanced model configuration with device optimization
+logger.info(f"Loading model: {MODEL_NAME}")
 
-model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B", trust_remote_code=True, truncate_dim=embedding_dim)
+# Enhanced model initialization with device mapping
+model = SentenceTransformer(
+    MODEL_NAME, 
+    truncate_dim=EMBEDDING_DIM,
+    model_kwargs={"device_map": device},
+    trust_remote_code=True
+)
 
+# Configure sequence length limits for optimal performance
+model.max_seq_length = MODEL_MAX_SEQ_LENGTH
+if hasattr(model.tokenizer, 'model_max_length'):
+    model.tokenizer.model_max_length = MODEL_MAX_SEQ_LENGTH
+if hasattr(model[0], 'max_position_embeddings'):
+    model[0].max_position_embeddings = MODEL_MAX_SEQ_LENGTH
+
+# Optimize model for inference
+model.to(device)
 # Set model to evaluation mode to save memory
 # Disables training-specific layers such as dropout and batch norm
 # Reference: https://stackoverflow.com/questions/55627780/evaluating-pytorch-models-with-torch-no-grad-vs-model-eval
@@ -71,6 +103,10 @@ model.eval()
 # Globally disables gradient computation and significantly reduces memory consumption
 # Reference: https://discuss.pytorch.org/t/does-model-eval-with-torch-set-grad-enabled-is-train-have-the-same-effect-for-grad-history/17183
 torch.set_grad_enabled(False)
+
+logger.info(f"Model loaded successfully with max_seq_length: {model.max_seq_length}")
+logger.info(f"Device configuration: device_map='{device}' + .to({device})")
+logger.info(f"Performance flags: CUDA={IS_CUDA_AVAILABLE}, MPS={IS_MPS_AVAILABLE}, CPU_ONLY={IS_CPU_ONLY}")
 
 # %%
 # Database paths configuration
@@ -109,7 +145,7 @@ db.execute(f"""
         text VARCHAR,
         header VARCHAR,
         page_number INTEGER,  -- Page number of the chunk in the document
-        embedding FLOAT[{embedding_dim}],
+        embedding FLOAT[{EMBEDDING_DIM}],
         created_at TIMESTAMP,
         FOREIGN KEY (document_id) REFERENCES documents(id)
     )
@@ -444,15 +480,16 @@ def _generate_chunk_embedding(header: str, chunk_text: str, file_path: str, chun
     text_for_embedding = f"{header}\n\n{chunk_text}{description_images}"
     
     try:
-        # Context manager that disables gradient tracking and prevents creation of intermediate buffers
-        # Improves memory efficiency and faster execution during inference
-        # Reference: https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html
-        with torch.no_grad():
+        # Using torch.inference_mode() for better performance and lower autograd overhead
+        # Recommended by PyTorch core devs for inference-only operations
+        # Reference: https://discuss.pytorch.org/t/pytorch-torch-no-grad-vs-torch-inference-mode/134099/3
+        with torch.inference_mode():
             embedding = model.encode(f"search_document: {text_for_embedding}", show_progress_bar=False)
         
         del text_for_embedding
 
         return embedding
+        
     except Exception as e:
         logger.error(f"Error generating embedding for chunk #{chunk_counter} of {file_path}: {str(e)}")
         raise
